@@ -27,8 +27,9 @@ func DecodeReleasedManifest(reader io.Reader) (Manifest, error) {
 // release of candidate's major version, working. The connection contract is:
 //
 //   - every authentication method keeps its ID, type, credential fields (name, type, whether it is required and
-//     its enum values) and OAuth scopes and user scopes, compared as sets or, for scopes from a setting, by the
-//     setting they name; the default method stays the same;
+//     its enum values) and the scopes it requests: OAuth scopes and user scopes, compared as sets or, for scopes
+//     from a setting, by the setting they name, and the scopes of a client credentials or JWT bearer grant that
+//     both releases declare; the default method stays the same;
 //   - the connection settings, spec.configuration and each method's configuration, only gain optional fields:
 //     no field is removed, renamed, retyped, made required or loses an enum value.
 //
@@ -80,6 +81,12 @@ func findMethodBreaks(released, candidate connectionMethod) []string {
 	breaks = append(breaks, findCredentialFieldBreaks(released.label, released.method.Fields, candidate.method.Fields)...)
 	breaks = append(breaks, findOAuthScopeBreaks(released.label+" OAuth scopes", oauthScopes(released.method.OAuth2), oauthScopes(candidate.method.OAuth2))...)
 	breaks = append(breaks, findScopeBreaks(released.label+" OAuth user scopes", oauthUserScopes(released.method.OAuth2), oauthUserScopes(candidate.method.OAuth2))...)
+	if released.method.ClientCredentials != nil && candidate.method.ClientCredentials != nil {
+		breaks = append(breaks, findScopeBreaks(released.label+" client credentials scopes", released.method.ClientCredentials.Scopes, candidate.method.ClientCredentials.Scopes)...)
+	}
+	if releasedJWTBearer, candidateJWTBearer := jwtBearerGrant(released.method), jwtBearerGrant(candidate.method); releasedJWTBearer != nil && candidateJWTBearer != nil {
+		breaks = append(breaks, findScopeBreaks(released.label+" JWT bearer scopes", releasedJWTBearer.Scopes, candidateJWTBearer.Scopes)...)
+	}
 	breaks = append(breaks, findSettingBreaks(released.label+" configuration", methodConfigurationFields(released.method), methodConfigurationFields(candidate.method))...)
 	return breaks
 }
@@ -173,7 +180,7 @@ func findScopeBreaks(label string, released, candidate []string) []string {
 // connectionMethodsInOrder returns the declared methods, or the single spec.auth method with the empty ID.
 func connectionMethodsInOrder(auth Auth) []connectionMethod {
 	if len(auth.Methods) == 0 {
-		return []connectionMethod{{label: "spec.auth", method: AuthMethod{Type: auth.Type, Fields: auth.Fields, OAuth2: auth.OAuth2}}}
+		return []connectionMethod{{label: "spec.auth", method: auth.singleMethod()}}
 	}
 	methods := make([]connectionMethod, 0, len(auth.Methods))
 	for _, method := range auth.Methods {
@@ -188,6 +195,13 @@ func connectionMethodsByID(auth Auth) map[string]connectionMethod {
 		methods[method.method.ID] = method
 	}
 	return methods
+}
+
+func jwtBearerGrant(method AuthMethod) *JWTBearerGrant {
+	if method.ServiceAccount == nil {
+		return nil
+	}
+	return method.ServiceAccount.JWTBearer
 }
 
 func methodConfigurationFields(method AuthMethod) []Field {

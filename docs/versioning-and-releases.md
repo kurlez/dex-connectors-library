@@ -57,9 +57,11 @@ connection of that major version working, so an application upgrades within a
 major version without authorizing again:
 
 - every authentication method keeps its ID, its type, its credential fields
-  (name, type, whether each is required, and enum values), and its OAuth
-  `scopes` and `userScopes`, or the setting that `scopes` names with
-  `{fromSetting}`;
+  (name, type, whether each is required, and enum values), and the scopes it
+  requests: its OAuth `scopes` and `userScopes`, or the setting that `scopes`
+  names with `{fromSetting}`, and the `scopes` of its `clientCredentials` or
+  `serviceAccount.jwtBearer` grant from the first release that declares the
+  grant;
 - `spec.auth.defaultMethod` stays the same, because a credential saved without
   a method uses the default method;
 - the settings, `spec.configuration` and each method's `configuration`, only

@@ -135,6 +135,34 @@ func TestConnectionCompatibilityComparesScopesFromASettingByItsName(t *testing.T
 	require.ErrorContains(t, schema.ValidateConnectionCompatibility(fixed, released), "spec.auth OAuth scopes change from a fixed list to setting scopes")
 }
 
+func TestConnectionCompatibilityKeepsTheScopesOfDeclaredMintingGrants(t *testing.T) {
+	released := decodeFixture(t, "token-grants.yaml")
+	for name, testCase := range map[string]struct {
+		edit          manifestEdit
+		contractBreak string
+	}{
+		"a client credentials scope": {
+			edit:          manifestEdit{"scopes: [https://api.example.com/.default]", "scopes: [https://api.example.com/.default, https://api.example.com/admin]"},
+			contractBreak: "auth method app-only client credentials scopes add https://api.example.com/admin",
+		},
+		"a JWT bearer scope": {
+			edit:          manifestEdit{"scopes: [https://api.example.com/mail.read]", "scopes: [https://api.example.com/mail.send]"},
+			contractBreak: "auth method delegation JWT bearer scopes add https://api.example.com/mail.send; auth method delegation JWT bearer scopes remove https://api.example.com/mail.read",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := decodeEditedFixture(t, "token-grants.yaml", testCase.edit)
+			require.ErrorContains(t, schema.ValidateConnectionCompatibility(released, candidate), testCase.contractBreak)
+		})
+	}
+
+	undeclared := decodeFixture(t, "token-grants.yaml")
+	undeclared.Spec.Auth.Methods[3].ServiceAccount = nil
+	undeclared.Spec.Auth.Methods[2].ClientCredentials = nil
+	require.NoError(t, schema.ValidateConnectionCompatibility(undeclared, released),
+		"a release that first declares a grant establishes its scopes")
+}
+
 func TestConnectionCompatibilityResolvesASingleMethodThroughTheDefaultMethod(t *testing.T) {
 	released := decodeFixture(t, "google-oauth.yaml")
 	const methods = `  auth:
