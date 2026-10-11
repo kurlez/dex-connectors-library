@@ -78,12 +78,17 @@ type sharedConnection struct {
 	recentFailureAt   time.Time
 }
 
-// credential returns the cached credential, reading the broker first when it is stale.
+// credential returns the cached credential, reading the broker first when it is stale. A caller that finds a stale
+// credential that has not expired never waits for a read in flight.
 func (connection *sharedConnection) credential(ctx context.Context) (brokerCredential, error) {
 	if credential, isUsable := connection.usableCredential(); isUsable {
 		return credential, nil
 	}
-	if err := connection.acquireReadSlot(ctx); err != nil {
+	if stale, hasUnexpiredCredential := connection.unexpiredCredential(); hasUnexpiredCredential {
+		if !connection.tryAcquireReadSlot() {
+			return stale, nil
+		}
+	} else if err := connection.acquireReadSlot(ctx); err != nil {
 		return brokerCredential{}, err
 	}
 	defer connection.releaseReadSlot()
@@ -93,15 +98,12 @@ func (connection *sharedConnection) credential(ctx context.Context) (brokerCrede
 	if err := connection.sharedRecentFailure(); err != nil {
 		return brokerCredential{}, err
 	}
-	timeout := credentialBrokerReadTimeout
-	cached, hasUnexpiredCredential := connection.unexpiredCredential()
-	if hasUnexpiredCredential {
-		timeout = credentialBrokerFallbackReadTimeout
-	}
-	credential, err := connection.read(ctx, 0, timeout)
-	if hasUnexpiredCredential && errors.Is(err, ErrCredentialBrokerUnavailable) {
-		connection.deferNextRead(brokerRetryInterval)
-		return cached, nil
+	credential, err := connection.read(ctx, 0)
+	if errors.Is(err, ErrCredentialBrokerUnavailable) {
+		if cached, hasUnexpiredCredential := connection.unexpiredCredential(); hasUnexpiredCredential {
+			connection.deferNextRead(brokerRetryInterval)
+			return cached, nil
+		}
 	}
 	if err != nil {
 		connection.rememberFailure(ctx, err)
@@ -123,7 +125,7 @@ func (connection *sharedConnection) credentialAfterRejection(ctx context.Context
 			return credential, nil
 		}
 	}
-	credential, err := connection.read(ctx, rejectedRevision, credentialBrokerReadTimeout)
+	credential, err := connection.read(ctx, rejectedRevision)
 	if err != nil {
 		return brokerCredential{}, err
 	}
@@ -139,7 +141,7 @@ func (connection *sharedConnection) prime(ctx context.Context) (json.RawMessage,
 		return nil, err
 	}
 	defer connection.releaseReadSlot()
-	answer, err := connection.broker.read(ctx, connection.currentSharedConnectionID(), 0, credentialBrokerReadTimeout)
+	answer, err := connection.broker.read(ctx, connection.currentSharedConnectionID(), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -150,10 +152,10 @@ func (connection *sharedConnection) prime(ctx context.Context) (json.RawMessage,
 }
 
 // read asks the broker. CONNECTION_NOT_SELECTED rereads the document once and follows a changed selection.
-func (connection *sharedConnection) read(ctx context.Context, rejectedRevision uint64, timeout time.Duration) (brokerCredential, error) {
+func (connection *sharedConnection) read(ctx context.Context, rejectedRevision uint64) (brokerCredential, error) {
 	hasRereadConfiguration := false
 	for {
-		answer, err := connection.broker.read(ctx, connection.currentSharedConnectionID(), rejectedRevision, timeout)
+		answer, err := connection.broker.read(ctx, connection.currentSharedConnectionID(), rejectedRevision)
 		if err != nil {
 			return brokerCredential{}, err
 		}
@@ -294,6 +296,15 @@ func (connection *sharedConnection) acquireReadSlot(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func (connection *sharedConnection) tryAcquireReadSlot() bool {
+	select {
+	case connection.readSlot <- struct{}{}:
+		return true
+	default:
+		return false
 	}
 }
 

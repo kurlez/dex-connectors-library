@@ -122,8 +122,10 @@ HTTP 408, 425, 429 and every 5xx status, and any transport error, are
 `ErrCredentialBrokerUnavailable`. Any other status, a redirect, a body that is
 not a JSON object, an unknown `status` and a `READY` answer without a credential object
 or revision are `ErrCredentialBrokerRejected`. A request ends within 40
-seconds, and a response is at most 1 MiB. Errors never contain the scope token
-or the response.
+seconds or when the calling Step is canceled, and a response is at most 1 MiB.
+A broker that has sent a refresh to a provider must finish and store its
+result even when the client disconnects, because a lost response can leave a
+rotated token unused. Errors never contain the scope token or the response.
 
 A broker that refreshes credentials should use the SDK's rules, so that both
 sides agree: `oauthtoken.IsRefreshRequiredWithIssueTime` skews expiry by
@@ -153,18 +155,22 @@ A shared entry then behaves like this:
   `rejectedRevision`. If the broker returns that revision, the credential is
   within its forced-refresh floor or cannot be refreshed, so the call fails
   with `ErrRejectedCredentialNotRefreshed` instead of repeating the provider
-  call with the rejected credential. The caller's retry policy decides when to
-  try again. The SDK does not know which revision a caller used, so a refresh
-  by a concurrent caller can make this comparison imprecise.
+  call with the rejected credential. A connector that maps this error to a
+  retryable failure lets the Step's retry policy try again later; one that
+  ignores it returns the provider's rejection. The SDK does not know which
+  revision a caller used, so a refresh by a concurrent caller can make this
+  comparison imprecise.
 - `REAUTHORIZATION_REQUIRED` is `ErrReauthorizationRequired`, which the
   provider package reports as `sdkgo.ErrReauthorizationRequired`.
 - `CONNECTION_NOT_SELECTED` rereads the current `configuration/head` once and
   takes only this entry's `sharedConnectionId` from it. If it names another
   shared connection, that one is read; otherwise the call fails with
   `ErrConnectionNotSelected`.
+- A caller that finds a stale credential that has not expired uses it at once
+  while another caller's read is in flight. When no credential is cached, or it
+  has expired, callers wait for that read with their own context.
 - While the broker is unavailable, a cached credential that has not expired
-  keeps working, and the broker is not asked again for 10 seconds. A read that
-  a cached credential can stand in for ends after 5 seconds. An expired
+  keeps working, and the broker is not asked again for 10 seconds. An expired
   credential is never returned.
 - Callers that arrive within 2 seconds of a failed read share its failure.
 

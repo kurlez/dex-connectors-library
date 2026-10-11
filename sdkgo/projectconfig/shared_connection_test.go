@@ -138,15 +138,51 @@ func TestStaticSharedCredentialIsReadAgainEveryFifteenMinutes(t *testing.T) {
 	require.Equal(t, 2, fixture.broker.requestCount(), "the interval counts from the latest read")
 }
 
-func TestConcurrentResolvesOfAStaleCredentialShareOneBrokerRead(t *testing.T) {
+// blockBrokerUntilReleased holds every broker request until the returned function runs, and at the latest until cleanup.
+func blockBrokerUntilReleased(t *testing.T, fixture *sharedFixture, reply func() brokerReply) (release func()) {
+	t.Helper()
+	released := make(chan struct{})
+	var once sync.Once
+	release = func() { once.Do(func() { close(released) }) }
+	t.Cleanup(release)
+	fixture.broker.respondWith(func(brokerRequest) brokerReply {
+		<-released
+		return reply()
+	})
+	return release
+}
+
+func TestCallersDoNotWaitForAReadInFlightWhileTheStaleCredentialIsUnexpired(t *testing.T) {
 	fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
 	resolver := fixture.resolver(t)
 	fixture.clock.Advance(50 * time.Second)
-	release := make(chan struct{})
-	fixture.broker.respondWith(func(brokerRequest) brokerReply {
-		<-release
-		return readyReply(2, "second", fixture.clock.Now(), time.Minute)
-	})
+	release := blockBrokerUntilReleased(t, fixture, func() brokerReply { return readyReply(2, "second", fixture.clock.Now(), time.Minute) })
+	leader := make(chan token, 1)
+	go func() {
+		value, err := resolver.Resolve(context.Background())
+		if err != nil {
+			t.Errorf("leader resolve failed: %v", err)
+		}
+		leader <- value
+	}()
+	require.Eventually(t, func() bool { return fixture.broker.requestCount() >= 2 }, 5*time.Second, 5*time.Millisecond)
+
+	for range 16 {
+		value, err := resolver.ResolveWithRefresh(context.Background(), forbiddenDriver{t})
+		require.NoError(t, err)
+		require.Equal(t, "first", value.Access, "the stale credential has not expired, so nobody waits for the read")
+	}
+	require.Equal(t, 2, fixture.broker.requestCount(), "the load and the leader's read")
+
+	release()
+	require.Equal(t, "second", (<-leader).Access)
+}
+
+func TestConcurrentResolvesOfAnExpiredCredentialShareOneBrokerRead(t *testing.T) {
+	fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
+	resolver := fixture.resolver(t)
+	fixture.clock.Advance(61 * time.Second)
+	release := blockBrokerUntilReleased(t, fixture, func() brokerReply { return readyReply(2, "second", fixture.clock.Now(), time.Minute) })
 
 	const callers = 16
 	values := make(chan token, callers)
@@ -164,7 +200,7 @@ func TestConcurrentResolvesOfAStaleCredentialShareOneBrokerRead(t *testing.T) {
 	}
 	require.Eventually(t, func() bool { return fixture.broker.requestCount() >= 2 }, 5*time.Second, 5*time.Millisecond)
 	require.Never(t, func() bool { return fixture.broker.requestCount() > 2 }, 200*time.Millisecond, 10*time.Millisecond)
-	close(release)
+	release()
 	wait.Wait()
 	close(values)
 
@@ -177,12 +213,8 @@ func TestConcurrentResolvesOfAStaleCredentialShareOneBrokerRead(t *testing.T) {
 func TestCallerWaitingForABrokerReadStopsWhenItsContextEnds(t *testing.T) {
 	fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
 	resolver := fixture.resolver(t)
-	fixture.clock.Advance(50 * time.Second)
-	release := make(chan struct{})
-	fixture.broker.respondWith(func(brokerRequest) brokerReply {
-		<-release
-		return readyReply(2, "second", fixture.clock.Now(), time.Minute)
-	})
+	fixture.clock.Advance(61 * time.Second)
+	release := blockBrokerUntilReleased(t, fixture, func() brokerReply { return readyReply(2, "second", fixture.clock.Now(), time.Minute) })
 	leader := make(chan token, 1)
 	go func() {
 		value, err := resolver.Resolve(context.Background())
@@ -198,7 +230,7 @@ func TestCallerWaitingForABrokerReadStopsWhenItsContextEnds(t *testing.T) {
 	_, err := resolver.Resolve(ctx)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 
-	close(release)
+	release()
 	require.Equal(t, "second", (<-leader).Access)
 	require.Equal(t, 2, fixture.broker.requestCount())
 }
@@ -335,6 +367,29 @@ func TestConnectionNotSelectedFailsWhenTheRereadDocumentNoLongerHasTheEntry(t *t
 	_, err = resolver.Resolve(context.Background())
 	require.ErrorIs(t, err, projectconfig.ErrConnectionNotSelected)
 	require.Equal(t, 2, fixture.broker.requestCount())
+}
+
+func TestChangedSelectionNeverFallsBackToTheOldConnectionsCredential(t *testing.T) {
+	fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
+	resolver := fixture.resolver(t)
+	fixture.clock.Advance(50 * time.Second)
+	fixture.writeConfiguration(t, 1, "conn-9")
+	fixture.broker.respondWith(func(request brokerRequest) brokerReply {
+		if request.body["sharedConnectionId"] == "conn-9" {
+			return brokerReply{statusCode: http.StatusServiceUnavailable, raw: "{}"}
+		}
+		return statusReply("CONNECTION_NOT_SELECTED")
+	})
+
+	_, err := resolver.Resolve(context.Background())
+	require.ErrorIs(t, err, projectconfig.ErrCredentialBrokerUnavailable, "the old connection's credential has not expired but is no longer this entry's")
+
+	fixture.clock.Advance(2 * time.Second)
+	fixture.broker.respondAlways(readyReply(5, "other", fixture.clock.Now(), time.Hour))
+	value, err := resolver.Resolve(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "other", value.Access)
+	require.Equal(t, map[string]any{"sharedConnectionId": "conn-9"}, fixture.broker.request(fixture.broker.requestCount()-1).body)
 }
 
 func TestCachedCredentialKeepsWorkingWhileTheBrokerIsUnavailable(t *testing.T) {

@@ -18,9 +18,6 @@ import (
 // credentialBrokerReadTimeout exceeds the 35 seconds within which the broker ends a read.
 const credentialBrokerReadTimeout = 40 * time.Second
 
-// credentialBrokerFallbackReadTimeout bounds a read that a cached, unexpired credential can stand in for.
-const credentialBrokerFallbackReadTimeout = 5 * time.Second
-
 const maximumCredentialBrokerResponseBytes = 1 << 20
 
 // maximumBrokerObjectBytes bounds the credential and the settings objects of one response.
@@ -103,7 +100,7 @@ func newCredentialBroker(configuration CredentialBrokerConfiguration, configurat
 
 // read asks the broker for one shared connection. A timeout is ErrCredentialBrokerUnavailable.
 // Errors never contain the scope token or the response.
-func (broker *credentialBroker) read(ctx context.Context, sharedConnectionID string, rejectedRevision uint64, timeout time.Duration) (credentialBrokerAnswer, error) {
+func (broker *credentialBroker) read(ctx context.Context, sharedConnectionID string, rejectedRevision uint64) (credentialBrokerAnswer, error) {
 	token, err := broker.bearerToken(ctx)
 	if err != nil {
 		return credentialBrokerAnswer{}, fmt.Errorf("credential broker token: %w", err)
@@ -112,7 +109,7 @@ func (broker *credentialBroker) read(ctx context.Context, sharedConnectionID str
 	if err != nil {
 		return credentialBrokerAnswer{}, errors.New("credential broker request encoding failed")
 	}
-	requestContext, cancel := context.WithTimeout(ctx, timeout)
+	requestContext, cancel := context.WithTimeout(ctx, credentialBrokerReadTimeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestContext, http.MethodPost, broker.endpoint, bytes.NewReader(body))
 	if err != nil {

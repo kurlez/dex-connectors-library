@@ -300,9 +300,10 @@ this path. The project provider reads its credential and settings from the
 document's credential broker, caches them, reads again when the credential is
 near expiry, and never calls the driver. When a rejection read returns the
 rejected credential unchanged, `ResolveCredentialAfterRejection` returns
-`projectconfig.ErrRejectedCredentialNotRefreshed`. The connector should fail
-the call then, instead of repeating it, so the Step's retry policy decides when
-to try again. See [projectconfig](projectconfig/README.md#shared-connections).
+`projectconfig.ErrRejectedCredentialNotRefreshed`. A connector should not repeat
+the provider call then. Mapping the error to a retryable failure lets the Step's
+retry policy try again later; a connector that ignores the error returns the
+provider's rejection. See [projectconfig](projectconfig/README.md#shared-connections).
 
 Hosted credential providers implement the same interface behind their trusted
 credential broker. Applications and Flow state receive only the resolved
