@@ -747,6 +747,13 @@ pending events after a restart, on any replica. The inbox removes an event when
 the target consumes it: the target returns nil, or it reports the event
 undeliverable.
 
+Before an inbox first reads its object, it creates an empty one with a
+create-only write (`If-None-Match: *`); a conflict means the object already
+exists. Without `s3:ListBucket`, S3 answers a read of a missing key with 403
+instead of 404, so the inbox never reads a missing key, and a 403 always means
+the grant does not cover the inbox. The application's grant needs `GetObject`
+and `PutObject` on its scope's `trigger-inboxes/` objects and no `ListBucket`.
+
 ## Release and tests
 
 The module is released independently with directory-prefixed tags such as
