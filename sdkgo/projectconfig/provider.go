@@ -48,6 +48,19 @@ type CredentialDecoder[C any] func(json.RawMessage) (C, error)
 // CredentialEncoder returns complete replacement JSON, retaining renewal material omitted by a provider response.
 type CredentialEncoder[C any] func(C) (json.RawMessage, error)
 
+// SharedCredentialUnmarshaler decodes the credential of a shared entry. A host that keeps a shared connection keeps
+// the secrets that only refresh or mint a credential, such as a refresh token, a client secret or a signing key, and
+// the credential broker serves the credential without them. A connector's generated credential type implements this
+// interface, on its pointer, when its manifest declares such secrets.
+//
+// CredentialResolver decodes a shared entry's credential with UnmarshalSharedCredential when *C implements it, and
+// otherwise with the CredentialDecoder, which requires every field. Ordinary entries always use the CredentialDecoder.
+type SharedCredentialUnmarshaler interface {
+	// UnmarshalSharedCredential decodes and validates contents, a credential without the host-kept secrets, into the
+	// receiver. It accepts those secrets when they are present, and its errors never contain credential values.
+	UnmarshalSharedCredential(contents []byte) error
+}
+
 // refreshTimeout bounds one provider refresh request.
 const refreshTimeout = 30 * time.Second
 
@@ -57,7 +70,8 @@ const refreshTimeout = 30 * time.Second
 //
 // An entry that the loaded document marks with sharedConnectionId resolves from the credential broker instead:
 // it caches what the broker serves, reads again when the credential is stale, never reads or writes the
-// stored connection and never calls the refresh driver.
+// stored connection and never calls the refresh driver. It decodes the credential with SharedCredentialUnmarshaler
+// when *C implements it.
 type CredentialResolver[C any] struct {
 	store  *ConnectionStore
 	key    ConnectionKey
@@ -215,11 +229,19 @@ func (provider *CredentialResolver[C]) resolveShared(ctx context.Context) (C, er
 	return provider.decodeShared(credential)
 }
 
+// decodeShared prefers the credential type's UnmarshalSharedCredential, because the broker omits host-kept secrets
+// that the connector's decoder requires.
 func (provider *CredentialResolver[C]) decodeShared(credential brokerCredential) (C, error) {
+	var credentials, zero C
+	if unmarshaler, isSharedAware := any(&credentials).(SharedCredentialUnmarshaler); isSharedAware {
+		if err := unmarshaler.UnmarshalSharedCredential(credential.credential); err != nil {
+			return zero, errors.New("shared project credential decoding failed")
+		}
+		return credentials, nil
+	}
 	credentials, err := provider.decode(credential.credential)
 	if err != nil {
-		var zero C
-		return zero, errors.New("project credential decoding failed")
+		return zero, errors.New("project credential decoding failed: this connector version does not support shared credentials")
 	}
 	return credentials, nil
 }
