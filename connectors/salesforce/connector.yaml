@@ -86,6 +86,9 @@ spec:
             - {credential: refresh_token, source: refresh_token}
             - {credential: instance_url, source: instance_url}
           pkce: true
+          refresh:
+            terminalErrorCodes: [inactive_org, inactive_user, invalid_client, invalid_client_credentials, invalid_client_id, invalid_grant, unauthorized_client, unsupported_grant_type]
+            missingExpiry: {lifetime: 2h}
       - id: salesforce-sandbox-oauth
         displayName: Sandbox org
         description: For sandbox orgs; Dex signs in through test.salesforce.com with the OAuth web server flow and refreshes the session automatically.
@@ -136,6 +139,9 @@ spec:
             - {credential: refresh_token, source: refresh_token}
             - {credential: instance_url, source: instance_url}
           pkce: true
+          refresh:
+            terminalErrorCodes: [inactive_org, inactive_user, invalid_client, invalid_client_credentials, invalid_client_id, invalid_grant, unauthorized_client, unsupported_grant_type]
+            missingExpiry: {lifetime: 2h}
       - id: salesforce-jwt-bearer
         displayName: Server-to-server JWT bearer
         description: Advanced method for an integration user without interactive consent; the connector signs a short-lived RS256 assertion with the app's private key and mints each session itself.
@@ -181,6 +187,23 @@ spec:
             - Enable OAuth with the scope Manage user data via APIs (api), enable JWT Bearer Flow, upload the certificate file, and save.
             - Under the app's Policies, set Permitted Users to Admin approved users are pre-authorized and add the integration user's profile or permission set; the JWT bearer flow never asks the user for consent.
             - Copy the consumer key from Settings > OAuth Settings > Consumer Key and Secret, enter the integration user's username, paste the complete PEM private key, and choose the login environment below.
+        serviceAccount:
+          jwtBearer:
+            privateKey: {fromCredential: jwt_private_key}
+            issuer: {fromCredential: oauth_client_id}
+            subject: {fromCredential: jwt_username}
+            audience:
+              fromCredential: jwt_login_environment
+              values: {"": https://login.salesforce.com, production: https://login.salesforce.com, sandbox: https://test.salesforce.com}
+            tokenEndpoint:
+              fromCredential: jwt_login_environment
+              values: {"": https://login.salesforce.com/services/oauth2/token, production: https://login.salesforce.com/services/oauth2/token, sandbox: https://test.salesforce.com/services/oauth2/token}
+            lifetime: 2m
+            credentialMappings:
+              - {credential: access_token, source: access_token}
+              - {credential: instance_url, source: instance_url}
+            terminalErrorCodes: [inactive_org, inactive_user, invalid_client, invalid_client_credentials, invalid_client_id, invalid_grant, unauthorized_client, unsupported_grant_type]
+            missingExpiry: {lifetime: 2h}
   studio:
     setup:
       entrypoint: index.html
