@@ -91,6 +91,19 @@ spec:
         - {credential: user_token, source: authed_user.access_token}
         - {credential: user_refresh_token, source: authed_user.refresh_token}
       pkce: false
+      tokenEndpointAuthMethod: client_secret_basic
+      refresh:
+        terminalErrorCodes: [invalid_refresh_token, bad_client_secret, invalid_client_id, invalid_auth, token_revoked, account_inactive, access_denied]
+        grants:
+          - refreshTokenCredential: bot_refresh_token
+            credentialMappings:
+              - {credential: bot_token, source: access_token}
+              - {credential: bot_refresh_token, source: refresh_token}
+          - refreshTokenCredential: user_refresh_token
+            grantedScopes: userScopes
+            credentialMappings:
+              - {credential: user_token, source: access_token}
+              - {credential: user_refresh_token, source: refresh_token}
   studio:
     setup:
       entrypoint: index.html
