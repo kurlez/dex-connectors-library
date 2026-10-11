@@ -310,6 +310,70 @@ func TestReleaseArtifactPublishesAuthMethodManifestFields(t *testing.T) {
 	require.Equal(t, []wireField{{Name: "model", StudioUnit: map[string]string{"unit": "modelPicker", "port": "model"}}}, spec.Configuration.Fields)
 }
 
+func TestReleaseArtifactPublishesTokenGrantDeclarations(t *testing.T) {
+	release := filepath.Join(t.TempDir(), "connector-release.json")
+	require.NoError(t, releaseArtifact([]string{
+		"--manifest", filepath.Join("..", "..", "schema", "testdata", "token-grants.yaml"),
+		"--module-path", "github.com/superdurable/dex-connectors-library/connectors/example/tokengrants",
+		"--version", "v0.1.0", "--tag", "connectors/example/tokengrants/v0.1.0",
+		"--source-sha", strings.Repeat("a", 40), "--output", release, "--digest-output", release + ".sha256",
+	}))
+	releaseBytes, err := os.ReadFile(release)
+	require.NoError(t, err)
+	var releaseWire struct {
+		Manifest struct {
+			Spec struct {
+				Auth struct {
+					Methods []map[string]json.RawMessage `json:"methods"`
+				} `json:"auth"`
+			} `json:"spec"`
+		} `json:"manifest"`
+	}
+	require.NoError(t, json.Unmarshal(releaseBytes, &releaseWire))
+	methods := releaseWire.Manifest.Spec.Auth.Methods
+	require.Len(t, methods, 5)
+	require.JSONEq(t, `{
+		"authorizationEndpoint": "https://login.example.com/authorize",
+		"tokenEndpoint": "https://login.example.com/token",
+		"tokenEndpointAuthMethod": "client_secret_basic",
+		"tokenRequestEncoding": "json",
+		"clientIDCredential": "client_id",
+		"clientSecretCredential": "client_secret",
+		"scopes": ["offline_access", "files.read"],
+		"credentialMappings": [
+			{"credential": "access_token", "source": "access_token"},
+			{"credential": "refresh_token", "source": "refresh_token"},
+			{"credential": "instance_url", "source": "instance_url"}
+		],
+		"pkce": true,
+		"protocol": "oauth2",
+		"refresh": {
+			"terminalErrorCodes": ["invalid_grant", "invalid_client"],
+			"missingExpiry": {"lifetime": "2h"},
+			"additionalParameters": {"scope": "offline_access files.read"}
+		}
+	}`, string(methods[0]["oauth2"]))
+	require.JSONEq(t, `{
+		"tokenEndpoint": {"template": "https://login.example.com/{tenant_id}/token"},
+		"clientIDCredential": "client_id",
+		"clientSecretCredential": "client_secret",
+		"scopes": ["https://api.example.com/.default"],
+		"credentialMappings": [{"credential": "access_token", "source": "access_token"}],
+		"terminalErrorCodes": ["invalid_client", "unauthorized_client"]
+	}`, string(methods[2]["clientCredentials"]))
+	require.JSONEq(t, `{"jwtBearer": {
+		"privateKey": {"fromCredential": "private_key"},
+		"issuer": {"fromCredential": "client_id"},
+		"subject": {"fromCredential": "username"},
+		"audience": {"fromCredential": "login_environment", "values": {"": "https://login.example.com", "production": "https://login.example.com", "sandbox": "https://test.example.com"}},
+		"tokenEndpoint": {"fromCredential": "login_environment", "values": {"": "https://login.example.com/token", "production": "https://login.example.com/token", "sandbox": "https://test.example.com/token"}},
+		"lifetime": "2m",
+		"credentialMappings": [{"credential": "access_token", "source": "access_token"}, {"credential": "instance_url", "source": "instance_url"}],
+		"terminalErrorCodes": ["invalid_grant", "invalid_client"],
+		"missingExpiry": {"lifetime": "2h"}
+	}}`, string(methods[4]["serviceAccount"]))
+}
+
 func TestStudioUIArtifactRejectsActiveSVG(t *testing.T) {
 	directory := t.TempDir()
 	uiRoot := filepath.Join(directory, "dist")

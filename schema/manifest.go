@@ -128,6 +128,10 @@ type Auth struct {
 	Fields         []Field             `yaml:"fields,omitempty" json:"fields,omitempty"`
 	Guide          *AuthorizationGuide `yaml:"guide,omitempty" json:"guide,omitempty"`
 	OAuth2         *OAuth2             `yaml:"oauth2,omitempty" json:"oauth2,omitempty"`
+	// ClientCredentials declares how an apiKey connection mints its access token with the client credentials grant.
+	ClientCredentials *ClientCredentialsGrant `yaml:"clientCredentials,omitempty" json:"clientCredentials,omitempty"`
+	// ServiceAccount declares how a serviceAccount connection mints its access token.
+	ServiceAccount *ServiceAccount `yaml:"serviceAccount,omitempty" json:"serviceAccount,omitempty"`
 	// Refreshable declares that the connector renews expiring credentials, such as with an OAuth
 	// refresh token, client credentials, or a signed JWT assertion. Generated code then requires a
 	// refreshing credential provider, so wiring a connector without refresh does not compile.
@@ -151,6 +155,10 @@ type AuthMethod struct {
 	Configuration *Configuration      `yaml:"configuration,omitempty" json:"configuration,omitempty"`
 	Guide         *AuthorizationGuide `yaml:"guide,omitempty" json:"guide,omitempty"`
 	OAuth2        *OAuth2             `yaml:"oauth2,omitempty" json:"oauth2,omitempty"`
+	// ClientCredentials declares how an apiKey connection mints its access token with the client credentials grant.
+	ClientCredentials *ClientCredentialsGrant `yaml:"clientCredentials,omitempty" json:"clientCredentials,omitempty"`
+	// ServiceAccount declares how a serviceAccount connection mints its access token.
+	ServiceAccount *ServiceAccount `yaml:"serviceAccount,omitempty" json:"serviceAccount,omitempty"`
 }
 
 type AuthorizationGuide struct {
@@ -171,6 +179,14 @@ type OAuth2 struct {
 	PKCE                    bool                        `yaml:"pkce" json:"pkce"`
 	Protocol                string                      `yaml:"protocol,omitempty" json:"protocol,omitempty"`
 	OIDC                    *OIDC                       `yaml:"oidc,omitempty" json:"oidc,omitempty"`
+	// TokenEndpointAuthMethod is how token requests present the client: client_secret_post when empty, or
+	// client_secret_basic. A connection without a client secret sends only client_id, as a public client.
+	TokenEndpointAuthMethod string `yaml:"tokenEndpointAuthMethod,omitempty" json:"tokenEndpointAuthMethod,omitempty"`
+	// TokenRequestEncoding is the token request body: form when empty, or json.
+	TokenRequestEncoding string `yaml:"tokenRequestEncoding,omitempty" json:"tokenRequestEncoding,omitempty"`
+	// Refresh declares how a host refreshes the access token with the stored refresh token. Its defaults apply when
+	// the method maps a refresh token without declaring it.
+	Refresh *OAuthRefresh `yaml:"refresh,omitempty" json:"refresh,omitempty"`
 }
 
 type OAuthCredentialMapping struct {
@@ -342,6 +358,14 @@ func (auth Auth) requiresAuthorization() bool {
 	return false
 }
 
+// singleMethod returns a spec.auth without methods as its one method, whose ID is empty.
+func (auth Auth) singleMethod() AuthMethod {
+	return AuthMethod{
+		Type: auth.Type, ConnectionKind: auth.ConnectionKind, Fields: auth.Fields, Guide: auth.Guide, OAuth2: auth.OAuth2,
+		ClientCredentials: auth.ClientCredentials, ServiceAccount: auth.ServiceAccount,
+	}
+}
+
 func (auth Auth) allFields() []Field {
 	if len(auth.Methods) == 0 {
 		return auth.Fields
@@ -369,6 +393,9 @@ func (manifest Manifest) Validate() error {
 	if mapsRefreshToken(manifest.Spec.Auth) && !manifest.Spec.Auth.Refreshable {
 		problems = append(problems, "spec.auth.refreshable must be true when an OAuth flow stores a refresh token")
 	}
+	if mintsAccessToken(manifest.Spec.Auth) && !manifest.Spec.Auth.Refreshable {
+		problems = append(problems, "spec.auth.refreshable must be true when a method declares clientCredentials or serviceAccount.jwtBearer")
+	}
 	if manifest.Kind != "Connector" {
 		problems = append(problems, "kind must be Connector")
 	}
@@ -392,16 +419,14 @@ func (manifest Manifest) Validate() error {
 	}
 	problems = append(problems, validateFields("configuration", manifest.Spec.Configuration.Fields, false)...)
 	if len(manifest.Spec.Auth.Methods) == 0 {
-		problems = append(problems, validateAuthMethod("spec.auth", AuthMethod{
-			Type: manifest.Spec.Auth.Type, ConnectionKind: manifest.Spec.Auth.ConnectionKind,
-			Fields: manifest.Spec.Auth.Fields, Guide: manifest.Spec.Auth.Guide, OAuth2: manifest.Spec.Auth.OAuth2,
-		}, manifest.Spec.Configuration.Fields)...)
+		problems = append(problems, validateAuthMethod("spec.auth", manifest.Spec.Auth.singleMethod(), manifest.Spec.Configuration.Fields)...)
 		if manifest.Spec.Auth.MethodLabel != "" {
 			problems = append(problems, "spec.auth.methodLabel requires spec.auth methods")
 		}
 	} else {
 		problems = append(problems, validateAuthMethodLabel(manifest.Spec.Auth.MethodLabel)...)
-		if manifest.Spec.Auth.Type != "" || manifest.Spec.Auth.ConnectionKind != "" || manifest.Spec.Auth.Guide != nil || manifest.Spec.Auth.OAuth2 != nil {
+		if manifest.Spec.Auth.Type != "" || manifest.Spec.Auth.ConnectionKind != "" || manifest.Spec.Auth.Guide != nil || manifest.Spec.Auth.OAuth2 != nil ||
+			manifest.Spec.Auth.ClientCredentials != nil || manifest.Spec.Auth.ServiceAccount != nil {
 			problems = append(problems, "spec.auth methods cannot be combined with legacy auth fields")
 		}
 		seenMethodIDs := make(map[string]bool, len(manifest.Spec.Auth.Methods))
@@ -847,6 +872,7 @@ func isValidJSONPath(value string) bool {
 
 func validateAuthMethod(prefix string, method AuthMethod, specConfigurationFields []Field) []string {
 	var problems []string
+	problems = append(problems, validateTokenGrants(prefix, method, specConfigurationFields)...)
 	if method.Type != "none" && method.Type != "apiKey" && method.Type != "oauth2" && method.Type != "serviceAccount" {
 		problems = append(problems, prefix+" type must be none, apiKey, oauth2, or serviceAccount")
 	}
@@ -1081,6 +1107,17 @@ func hasValidUniqueStrings(values []string, pattern *regexp.Regexp) bool {
 		seen[value] = true
 	}
 	return true
+}
+
+// mintsAccessToken reports whether any method of auth mints its access token from stored client or key material.
+func mintsAccessToken(auth Auth) bool {
+	methods := append([]AuthMethod{auth.singleMethod()}, auth.Methods...)
+	for _, method := range methods {
+		if method.ClientCredentials != nil || method.ServiceAccount != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // mapsRefreshToken reports whether any OAuth flow of auth stores a provider refresh token.
