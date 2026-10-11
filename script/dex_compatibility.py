@@ -225,18 +225,32 @@ def rate_limit_wait(error: urllib.error.HTTPError) -> float | None:
 
     GitHub answers a primary or secondary rate limit with 403 or 429 and either
     retry-after or x-ratelimit-remaining: 0 with x-ratelimit-reset (epoch
-    seconds); without a reset it asks for at least a minute.
+    seconds); without a reset it asks for at least a minute. A secondary limit
+    may carry neither header and only say so in its error message, which also
+    asks for at least a minute.
     """
-    headers = error.headers
-    if error.code not in (403, 429) or headers is None:
+    if error.code not in (403, 429):
         return None
+    headers = error.headers or {}
     retry_after = (headers.get("retry-after") or "").strip()
     if retry_after.isdigit():
         return float(retry_after)
     if (headers.get("x-ratelimit-remaining") or "").strip() == "0":
         reset = (headers.get("x-ratelimit-reset") or "").strip()
         return max(0.0, float(reset) - time.time()) if reset.isdigit() else 60.0
+    if is_secondary_rate_limit_message(error):
+        return 60.0
     return None
+
+
+def is_secondary_rate_limit_message(error: urllib.error.HTTPError) -> bool:
+    """Reports whether GitHub's JSON error message names a secondary rate limit."""
+    try:
+        body = json.loads(error.read(65536) or b"{}")
+    except (OSError, ValueError, AttributeError):
+        return False
+    message = body.get("message") if isinstance(body, dict) else None
+    return isinstance(message, str) and "secondary rate limit" in message.lower()
 
 
 def github_releases(repository: str) -> list[dict[str, object]]:

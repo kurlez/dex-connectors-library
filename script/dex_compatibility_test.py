@@ -197,8 +197,8 @@ class LatestDexGoSdkTest(unittest.TestCase):
 class TransientGitHubRetryTest(unittest.TestCase):
     URL = "https://github.com/superdurable/dex/releases/download/cli-v1.5.0/checksums.txt"
 
-    def http_error(self, status: int, headers: dict[str, str] | None = None) -> urllib.error.HTTPError:
-        return urllib.error.HTTPError(self.URL, status, "error", headers or {}, None)
+    def http_error(self, status: int, headers: dict[str, str] | None = None, body: bytes = b"") -> urllib.error.HTTPError:
+        return urllib.error.HTTPError(self.URL, status, "error", headers or {}, io.BytesIO(body))
 
     def test_download_retries_server_errors_until_the_asset_arrives(self) -> None:
         responses = [self.http_error(503), self.http_error(502), io.BytesIO(b"checksums")]
@@ -268,6 +268,11 @@ class TransientGitHubRetryTest(unittest.TestCase):
         self.assertIsNone(rate_limit_wait(self.http_error(403, {"x-ratelimit-remaining": "12"})))
         self.assertIsNone(rate_limit_wait(self.http_error(429)))
         self.assertIsNone(rate_limit_wait(self.http_error(404, {"retry-after": "3"})))
+        secondary = b'{"message": "You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}'
+        self.assertEqual(rate_limit_wait(self.http_error(403, body=secondary)), 60.0)
+        self.assertEqual(rate_limit_wait(self.http_error(429, body=secondary)), 60.0)
+        self.assertIsNone(rate_limit_wait(self.http_error(403, body=b'{"message": "Resource not accessible by integration"}')))
+        self.assertIsNone(rate_limit_wait(self.http_error(403, body=b"<html>forbidden</html>")))
 
 
 if __name__ == "__main__":
