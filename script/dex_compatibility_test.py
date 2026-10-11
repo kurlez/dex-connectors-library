@@ -3,6 +3,7 @@
 
 import io
 import re
+import subprocess
 import tempfile
 import unittest
 import urllib.error
@@ -18,6 +19,7 @@ from script.dex_compatibility import (
     GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS,
     connector_releases,
     create_module_proxy,
+    dexcli_archive_name,
     dex_web_compatibility_sources,
     dex_web_compatibility_test_names,
     download,
@@ -26,6 +28,8 @@ from script.dex_compatibility import (
     flow_examples,
     manifests,
     rate_limit_wait,
+    resolve_dex_release,
+    stable_cli_tags,
     parse_connector_directories,
     require_dex_web_security_tests_passed,
     require_dex_web_tests_passed,
@@ -273,6 +277,60 @@ class TransientGitHubRetryTest(unittest.TestCase):
         self.assertEqual(rate_limit_wait(self.http_error(429, body=secondary)), 60.0)
         self.assertIsNone(rate_limit_wait(self.http_error(403, body=b'{"message": "Resource not accessible by integration"}')))
         self.assertIsNone(rate_limit_wait(self.http_error(403, body=b"<html>forbidden</html>")))
+
+
+class DexReleaseResolutionTest(unittest.TestCase):
+    LS_REMOTE = "\n".join([
+        "a1\trefs/tags/cli-v1.6.4",
+        "b1\trefs/tags/cli-v1.7.0",
+        "b2\trefs/tags/cli-v1.7.0^{}",
+        "c1\trefs/tags/cli-v1.8.0-rc.1",
+        "d1\trefs/tags/cli-v1.10.0",
+        "e1\trefs/tags/cli-vnext",
+    ]) + "\n"
+
+    def release(self, tag: str, **fields: object) -> dict[str, object]:
+        assets = [{"name": dexcli_archive_name(tag[4:])}, {"name": "checksums.txt"}]
+        return {"tag_name": tag, "draft": False, "prerelease": False, "assets": assets, **fields}
+
+    def resolve(self, requested: str, releases: dict[str, object]) -> tuple[dict[str, object], list[str]]:
+        listed = subprocess.CompletedProcess([], 0, stdout=self.LS_REMOTE, stderr="")
+        requested_urls: list[str] = []
+
+        def github_json(url: str) -> object:
+            requested_urls.append(url)
+            tag = url.rsplit("/", 1)[1]
+            if tag not in releases:
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+            return releases[tag]
+
+        with patch("script.dex_compatibility.run", return_value=listed), \
+                patch("script.dex_compatibility.github_json", side_effect=github_json):
+            return resolve_dex_release(requested), requested_urls
+
+    def test_stable_cli_tags_prefer_the_peeled_commit_and_skip_other_tags(self) -> None:
+        listed = subprocess.CompletedProcess([], 0, stdout=self.LS_REMOTE, stderr="")
+        with patch("script.dex_compatibility.run", return_value=listed):
+            self.assertEqual(stable_cli_tags("superdurable/dex"), {"cli-v1.6.4": "a1", "cli-v1.7.0": "b2", "cli-v1.10.0": "d1"})
+
+    def test_the_highest_stable_release_costs_one_api_request(self) -> None:
+        release, urls = self.resolve("latest", {"cli-v1.10.0": self.release("cli-v1.10.0"), "cli-v1.7.0": self.release("cli-v1.7.0")})
+        self.assertEqual((release["tag_name"], release["resolved_commit"]), ("cli-v1.10.0", "d1"))
+        self.assertEqual(urls, ["https://api.github.com/repos/superdurable/dex/releases/tags/cli-v1.10.0"])
+
+    def test_tags_without_a_finished_stable_release_are_skipped(self) -> None:
+        for newest in ({}, {"cli-v1.10.0": self.release("cli-v1.10.0", prerelease=True)},
+                       {"cli-v1.10.0": self.release("cli-v1.10.0", assets=[{"name": "checksums.txt"}])}):
+            release, urls = self.resolve("latest", {**newest, "cli-v1.7.0": self.release("cli-v1.7.0")})
+            self.assertEqual((release["tag_name"], release["resolved_commit"]), ("cli-v1.7.0", "b2"))
+            self.assertEqual(len(urls), 2)
+
+    def test_an_exact_version_resolves_only_that_tag(self) -> None:
+        release, urls = self.resolve("v1.6.4", {"cli-v1.6.4": self.release("cli-v1.6.4"), "cli-v1.10.0": self.release("cli-v1.10.0")})
+        self.assertEqual(release["tag_name"], "cli-v1.6.4")
+        self.assertEqual(urls, ["https://api.github.com/repos/superdurable/dex/releases/tags/cli-v1.6.4"])
+        with self.assertRaisesRegex(RuntimeError, "no stable Dex CLI release found for v1.8.0-rc.1"):
+            self.resolve("v1.8.0-rc.1", {})
 
 
 if __name__ == "__main__":

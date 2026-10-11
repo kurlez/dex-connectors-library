@@ -143,7 +143,10 @@ the catalog.
 
 CI also runs Current compatibility on pull requests and `main`. Every mode
 resolves the highest stable `cli-vX.Y.Z` Dex release on GitHub, logs its tag
-and commit, and verifies the downloaded CLI checksum. Connector and SDK
+and commit, and verifies the downloaded CLI checksum. It lists the tags with
+`git ls-remote` and reads only the chosen release from the REST API, because
+every job of a run shares one API rate limit, and it skips a release whose
+archive or `checksums.txt` is not uploaded yet. Connector and SDK
 publishing resolve the release the same way. A daily canary runs Released
 compatibility for the highest stable component tag of every current connector.
 The [latest Dex Go SDK check](#latest-dex-go-sdk-check) runs on pull requests,
