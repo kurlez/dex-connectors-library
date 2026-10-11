@@ -12,8 +12,7 @@ import (
 	"strings"
 )
 
-// credentialBrokerTokenName is the fixed name of the scope token's private object. The DEX_ prefix is reserved,
-// so an application can never declare an environment value that shares its object prefix.
+// credentialBrokerTokenName names the scope token's object; the reserved prefix keeps applications from declaring it.
 const credentialBrokerTokenName = "DEX_CREDENTIAL_BROKER_TOKEN"
 
 const maximumCredentialBrokerEndpointLength = 2048
@@ -32,8 +31,8 @@ func (store *ConfigurationStore) CreateCredentialBrokerToken(ctx context.Context
 }
 
 // readCredentialBrokerToken reads the exact scope token that the configuration pins.
-func (store *ConfigurationStore) readCredentialBrokerToken(ctx context.Context, broker CredentialBrokerConfiguration) (string, error) {
-	return store.readSecretValue(ctx, broker.TokenSecretRef, credentialBrokerTokenName)
+func (store *ConfigurationStore) readCredentialBrokerToken(ctx context.Context, reference ApplicationSecretRef) (string, error) {
+	return store.readSecretValue(ctx, reference, credentialBrokerTokenName)
 }
 
 func isSupportedSchemaVersion(version string) bool {

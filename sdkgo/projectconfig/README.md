@@ -3,8 +3,10 @@
 `projectconfig` shares one versioned object protocol between project Dex Web and
 application replicas. Dex Web owns ordinary configuration, API-key entry, and
 generic manifest-driven OAuth. The application Connector SDK refreshes a known
-expired credential only when an operation uses it. There is no broker, refresh
-scheduler, SQL store, or process-local refresh lock.
+expired credential only when an operation uses it. An ordinary entry has no
+broker, refresh scheduler, SQL store, or process-local refresh lock. An entry
+that names a shared connection instead reads its credential and settings from a
+credential broker; see [Shared connections](#shared-connections).
 
 The shared package imports only the Go standard library and AWS libraries. Dex
 Server/Web imports this package, **not** `projectconfig/provider`. The latter
@@ -37,8 +39,8 @@ Deleting objects or versions is reserved for scope cleanup. Retention must not
 remove a version referenced by an active configuration or credential head.
 
 `ConfigurationStore` owns one CAS document at `<scope>/configuration/head`.
-It validates identity, revision, JSON shape, duplicate bindings, and connection
-references. Dex Web validates fields against exact connector manifests before
+It validates identity, revision, JSON shape, duplicate bindings, connection
+references, and shared connections. Dex Web validates fields against exact connector manifests before
 writing; this store cannot infer whether arbitrary JSON values contain secrets.
 Snapshots pin exact version and `sha256:<hex>` digest, and include only ordinary
 settings, logical connection identities, and exact private application-secret references. A later connector credential replacement or
@@ -58,6 +60,117 @@ scope's `oauth/<sha256(state)>` path. It verifies actor, state, callback identit
 expiry, scope, and connector manifest before asking this package to admit an
 exchange. Raw state, PKCE, client secret, authorization code, and tokens remain
 private encrypted objects, outside Flow input and state.
+
+## Shared connections
+
+A configuration document at schema version
+`connectors.dex.dev/project-configuration/v1alpha3` may declare a credential
+broker and name shared connections. Readers also accept `v1alpha2`, which
+carries neither; the writer stamps `v1alpha2` on a document that uses neither,
+so applications built before `v1alpha3` still read it.
+
+```json
+{
+  "schemaVersion": "connectors.dex.dev/project-configuration/v1alpha3",
+  "connections": [
+    {"connectorId": "github", "connectionName": "releases", "modulePath": "...", "provider": "github", "sharedConnectionId": "conn-7"}
+  ],
+  "credentialBroker": {
+    "endpoint": "https://broker.example.test/internal/connection-credentials/read",
+    "tokenSecretRef": {"key": "projects/p1/live/app-secrets/DEX_CREDENTIAL_BROKER_TOKEN/<32 hex>", "version": "...", "digest": "sha256:..."}
+  }
+}
+```
+
+- `sharedConnectionId` is an entry field. The entry carries no `configuration`
+  (it is absent or `{}`) and no credential, and a document with a shared entry
+  must declare `credentialBroker`.
+- `credentialBroker.endpoint` is an absolute `https` URL, or `http` for a
+  loopback, private, single-label or cluster-local host.
+- `credentialBroker.tokenSecretRef` pins the scope token as a private object
+  with the application-secret format and the fixed name
+  `DEX_CREDENTIAL_BROKER_TOKEN`. The reserved prefix keeps it apart from
+  application environment values. `ConfigurationStore.CreateCredentialBrokerToken`
+  writes it. The application role needs read access to that object like any
+  other application secret, and to `configuration/head` for the reread below.
+
+### Wire contract
+
+An entry with `sharedConnectionId` reads the broker with one request:
+
+```text
+POST <credentialBroker.endpoint>
+Authorization: Bearer <scope token>
+Content-Type: application/json
+
+{"sharedConnectionId": "conn-7", "rejectedRevision": 3}
+```
+
+`rejectedRevision` is present only when a provider rejected that revision. The
+broker answers HTTP 200 with a JSON object; unknown members are ignored:
+
+| Member | Meaning |
+| --- | --- |
+| `status` | `READY`, `REAUTHORIZATION_REQUIRED` or `CONNECTION_NOT_SELECTED`. |
+| `credential` | `READY` only. The complete credential object that the connector's generated `decodeCredentials` accepts, at most 64 KiB. |
+| `settings` | Optional, with any status. The same object as an ordinary entry's `configuration`. |
+| `revision` | `READY` only. A positive integer that changes whenever the credential changes. |
+| `issuedAt` | `READY`. When the credential was issued, as RFC 3339; absent when unknown. |
+| `expiresAt` | `READY`. When it expires, as RFC 3339; absent or `null` for a credential that does not expire. |
+
+HTTP 408, 425, 429 and every 5xx status, and any transport error, are
+`ErrCredentialBrokerUnavailable`. Any other status, a redirect, a body that is
+not a JSON object, an unknown `status` and a `READY` answer without a credential object
+or revision are `ErrCredentialBrokerRejected`. A request ends within 40
+seconds, and a response is at most 1 MiB. Errors never contain the scope token
+or the response.
+
+A broker that refreshes credentials should use the SDK's rules, so that both
+sides agree: `oauthtoken.IsRefreshRequiredWithIssueTime` skews expiry by
+`min(5 minutes, lifetime/4)`, and `oauthtoken.ForcedRefreshFloor` is the time
+after issue during which a read with `rejectedRevision` returns the credential
+unchanged.
+
+### Resolution
+
+`LoadFromEnvironment` reads the broker once for each shared entry before it
+returns. It fills the entry's settings into `LoadedProject.Configuration`, so
+the connector's generated `NewProjectConnection` decodes them like an ordinary
+entry's, and it caches the first credential. The generated code does not
+change: `provider.NewCredentialProvider` and `NewRefreshingCredentialProvider`
+route an entry that the document marks as shared to the broker.
+
+A shared entry then behaves like this:
+
+- It caches the credential in memory and never reads or writes `connections/*`.
+- It never calls the connector's refresh driver, not even `RefreshRequired`.
+  It reads the broker again when the credential is within `min(5 minutes,
+  lifetime/4)` of expiry, where `lifetime` is `expiresAt - issuedAt` (5 minutes
+  when `issuedAt` is absent), and a credential without an expiry every 15
+  minutes. One read is in flight for an entry; concurrent callers wait for it
+  with their own context and use its result.
+- `ResolveAfterRejection` reads again with the cached revision as
+  `rejectedRevision`. If the broker returns that revision, the credential is
+  within its forced-refresh floor or cannot be refreshed, so the call fails
+  with `ErrRejectedCredentialNotRefreshed` instead of repeating the provider
+  call with the rejected credential. The caller's retry policy decides when to
+  try again. The SDK does not know which revision a caller used, so a refresh
+  by a concurrent caller can make this comparison imprecise.
+- `REAUTHORIZATION_REQUIRED` is `ErrReauthorizationRequired`, which the
+  provider package reports as `sdkgo.ErrReauthorizationRequired`.
+- `CONNECTION_NOT_SELECTED` rereads the current `configuration/head` once and
+  takes only this entry's `sharedConnectionId` from it. If it names another
+  shared connection, that one is read; otherwise the call fails with
+  `ErrConnectionNotSelected`.
+- While the broker is unavailable, a cached credential that has not expired
+  keeps working, and the broker is not asked again for 10 seconds. A read that
+  a cached credential can stand in for ends after 5 seconds. An expired
+  credential is never returned.
+- Callers that arrive within 2 seconds of a failed read share its failure.
+
+Limits: settings are read once at load, so a settings change applies when the
+application restarts, and an application whose broker is unreachable at start
+fails to load.
 
 ## Admission, recovery, and refresh
 
@@ -196,7 +309,10 @@ view must exclude `CredentialMaterial`, `Object.Contents`, and storage targets.
 
 ## Tests
 
-`make test-common` runs the existing SDK compilation, race and vet checks.
+`make test-common` runs the existing SDK compilation, race and vet checks, which
+include the shared connection tests. They run the loaded project against an
+in-process HTTP endpoint that plays the broker, so they cover the wire contract
+and the resolution rules above but not a real broker.
 `make test-projectconfig-s3-integration` calls real AWS S3/KMS using the caller's
 default credential chain. It requires an explicitly configured existing versioned
 bucket and exact KMS key ARN. It creates a unique owned prefix, checks conditional

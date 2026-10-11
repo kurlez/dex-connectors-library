@@ -48,11 +48,13 @@ Attributes.
 ## Shared project configuration
 
 Project Dex Web and application replicas can share versioned encrypted S3
-configuration without a credential broker. See
+configuration. An entry that names a shared connection reads its credential
+from a credential broker instead. See
 [projectconfig](projectconfig/README.md) for scope-bound configuration snapshots,
-conditional credential admission, restart recovery, the typed SDK adapter, and
-the runnable environment-loader example. Existing providers are unchanged;
-applications explicitly choose this provider.
+conditional credential admission, restart recovery, shared connections and the
+broker's wire contract, the typed SDK adapter, and the runnable
+environment-loader example. Existing providers are unchanged; applications
+explicitly choose this provider.
 
 ## Trigger delivery outcomes
 
@@ -292,6 +294,15 @@ Any other failed refresh keeps the existing credential authorized, returns
 `projectconfig.ErrRefreshFailed`, and the next call refreshes again.
 When an OAuth provider omits a new refresh token, the driver must copy the prior
 refresh token into its result.
+
+An entry that the configuration document marks with `sharedConnectionId` skips
+this path. The project provider reads its credential and settings from the
+document's credential broker, caches them, reads again when the credential is
+near expiry, and never calls the driver. When a rejection read returns the
+rejected credential unchanged, `ResolveCredentialAfterRejection` returns
+`projectconfig.ErrRejectedCredentialNotRefreshed`. The connector should fail
+the call then, instead of repeating it, so the Step's retry policy decides when
+to try again. See [projectconfig](projectconfig/README.md#shared-connections).
 
 Hosted credential providers implement the same interface behind their trusted
 credential broker. Applications and Flow state receive only the resolved

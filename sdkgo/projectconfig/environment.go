@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -21,16 +23,20 @@ type LoadedProject struct {
 	objects        ObjectStore
 	scope          Scope
 	configurations *ConfigurationStore
-	// Connections resolves private credential material through the fixed project boundary.
+	// Connections resolves private credential material through the fixed project boundary, and a shared entry's
+	// credential through the credential broker.
 	Connections *ConnectionStore
 	// Configuration is the exact ordinary snapshot accepted for this application instance.
+	// The settings of a shared entry are the broker's, read once at load.
 	Configuration Configuration
 	// Snapshot identifies the exact immutable configuration object version and digest.
 	Snapshot SnapshotRef
 }
 
 // LoadFromEnvironment loads the trusted DEX_PROJECT_* deployment contract and AWS default credential chain.
-// It reads only the pinned ordinary snapshot at startup; no credential read or provider refresh occurs.
+// It reads only the pinned ordinary snapshot at startup; no stored credential read or provider refresh occurs.
+// A snapshot with shared entries also reads each one's settings and credential from the credential broker,
+// which must be reachable, and settings changes apply on the next start.
 // Hosted storage requires an exact KMS key ARN. Local S3 endpoints require explicit local-storage opt-in.
 func LoadFromEnvironment(ctx context.Context) (*LoadedProject, error) {
 	scope := Scope{ProjectID: os.Getenv("DEX_PROJECT_ID"), Kind: os.Getenv("DEX_PROJECT_SCOPE")}
@@ -66,20 +72,39 @@ func LoadFromEnvironment(ctx context.Context) (*LoadedProject, error) {
 	if err != nil {
 		return nil, err
 	}
-	connections, err := NewConnectionStore(&ConnectionStoreConfig{Objects: objects, Scope: scope})
-	if err != nil {
-		return nil, err
-	}
+	reference := SnapshotRef{Key: os.Getenv("DEX_PROJECT_CONFIG_KEY"), Version: os.Getenv("DEX_PROJECT_CONFIG_VERSION"), Digest: os.Getenv("DEX_PROJECT_CONFIG_DIGEST"), MediaType: "application/json"}
+	return loadProject(ctx, objects, scope, reference, brokerClientOptions{})
+}
+
+// brokerClientOptions let tests replace the broker client's HTTP client and clock.
+type brokerClientOptions struct {
+	httpClient *http.Client
+	now        func() time.Time
+}
+
+// loadProject reads the pinned snapshot, builds the stores, and reads each shared entry's settings.
+func loadProject(ctx context.Context, objects ObjectStore, scope Scope, reference SnapshotRef, options brokerClientOptions) (*LoadedProject, error) {
 	configurations, err := NewConfigurationStore(&ConfigurationStoreConfig{Objects: objects, Scope: scope})
 	if err != nil {
 		return nil, err
 	}
-	reference := SnapshotRef{Key: os.Getenv("DEX_PROJECT_CONFIG_KEY"), Version: os.Getenv("DEX_PROJECT_CONFIG_VERSION"), Digest: os.Getenv("DEX_PROJECT_CONFIG_DIGEST"), MediaType: "application/json"}
 	configuration, err := configurations.ReadSnapshot(ctx, reference)
 	if err != nil {
 		return nil, err
 	}
-	return &LoadedProject{objects: objects, scope: scope, configurations: configurations, Connections: connections, Configuration: configuration, Snapshot: reference}, nil
+	storeConfig := &ConnectionStoreConfig{Objects: objects, Scope: scope}
+	if configuration.CredentialBroker != nil {
+		storeConfig.sharedConnections = &sharedConnectionsConfig{configuration: configuration, configurations: configurations, httpClient: options.httpClient, now: options.now}
+	}
+	connections, err := NewConnectionStore(storeConfig)
+	if err != nil {
+		return nil, err
+	}
+	project := &LoadedProject{objects: objects, scope: scope, configurations: configurations, Connections: connections, Configuration: configuration, Snapshot: reference}
+	if err = project.loadSharedConnectionSettings(ctx); err != nil {
+		return nil, err
+	}
+	return project, nil
 }
 
 // TriggerInbox binds one Trigger binding's durable inbox in the loaded project scope.
