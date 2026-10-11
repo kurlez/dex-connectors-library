@@ -306,113 +306,33 @@ func TestReauthorizationRequiredIsReportedAndClearsTheCache(t *testing.T) {
 	require.Equal(t, "second", value.Access)
 }
 
-func TestConnectionNotSelectedInALiveDocumentIsTerminalAndNeverRereadsTheConfiguration(t *testing.T) {
-	fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
-	resolver := fixture.resolver(t)
-	fixture.clock.Advance(50 * time.Second)
-	fixture.writeConfiguration(t, 1, "conn-9")
-	fixture.broker.respondAlways(statusReply("CONNECTION_NOT_SELECTED"))
-	fixture.objects.reset()
+func TestConnectionNotSelectedIsTerminalAndNeverFollowsAChangedSelection(t *testing.T) {
+	for name, scope := range map[string]projectconfig.Scope{"Live": sharedScope, "Preview": previewScope} {
+		t.Run(name, func(t *testing.T) {
+			fixture := warmedSharedFixture(t, scope, readyReply(1, "first", epoch, time.Minute))
+			resolver := fixture.resolver(t)
+			fixture.clock.Advance(50 * time.Second)
+			fixture.writeConfiguration(t, 1, "conn-9")
+			fixture.broker.respondWith(func(request brokerRequest) brokerReply {
+				if request.body["sharedConnectionId"] == "conn-9" {
+					return readyReply(5, "other", fixture.clock.Now(), time.Hour)
+				}
+				return statusReply("CONNECTION_NOT_SELECTED")
+			})
+			fixture.objects.reset()
 
-	_, err := resolver.Resolve(context.Background())
-	require.ErrorIs(t, err, projectconfig.ErrConnectionNotSelected)
-	require.Zero(t, fixture.objects.currentHeadReads(), "a frozen Live document has no other selection to follow")
-	require.Equal(t, 2, fixture.broker.requestCount(), "the warm read and the one that was refused")
+			_, err := resolver.Resolve(context.Background())
+			require.ErrorIs(t, err, projectconfig.ErrConnectionNotSelected)
+			require.Zero(t, fixture.objects.currentHeadReads(), "the process keeps the selection it was loaded with")
+			require.Equal(t, 2, fixture.broker.requestCount(), "the warm read and the one that was refused")
 
-	fixture.clock.Advance(2 * time.Second)
-	_, err = resolver.Resolve(context.Background())
-	require.ErrorIs(t, err, projectconfig.ErrConnectionNotSelected)
-	require.Equal(t, 3, fixture.broker.requestCount())
-	require.Equal(t, map[string]any{"sharedConnectionId": "conn-7"}, fixture.broker.request(2).body, "the entry keeps its frozen selection")
-}
-
-func TestConnectionNotSelectedRereadsTheConfigurationDocumentOnceThenFails(t *testing.T) {
-	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
-	resolver := fixture.resolver(t)
-	fixture.clock.Advance(50 * time.Second)
-	fixture.broker.respondAlways(statusReply("CONNECTION_NOT_SELECTED"))
-	fixture.objects.reset()
-
-	_, err := resolver.Resolve(context.Background())
-	require.ErrorIs(t, err, projectconfig.ErrConnectionNotSelected)
-	require.Equal(t, 1, fixture.objects.currentHeadReads(), "the document is reread exactly once")
-	require.Equal(t, 2, fixture.broker.requestCount(), "the same selection is not read again")
-}
-
-func TestConnectionNotSelectedFollowsTheSelectionOfTheRereadDocument(t *testing.T) {
-	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
-	resolver := fixture.resolver(t)
-	fixture.clock.Advance(50 * time.Second)
-	fixture.writeConfiguration(t, 1, "conn-9")
-	fixture.broker.respondWith(func(request brokerRequest) brokerReply {
-		if request.body["sharedConnectionId"] == "conn-9" {
-			return readyReply(5, "other", fixture.clock.Now(), time.Hour)
-		}
-		return statusReply("CONNECTION_NOT_SELECTED")
-	})
-	fixture.objects.reset()
-
-	value, err := resolver.Resolve(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, "other", value.Access)
-	require.Equal(t, 1, fixture.objects.currentHeadReads())
-	require.Equal(t, 3, fixture.broker.requestCount())
-	require.Equal(t, map[string]any{"sharedConnectionId": "conn-9"}, fixture.broker.request(2).body)
-
-	value, err = resolver.Resolve(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, "other", value.Access)
-	require.Equal(t, 3, fixture.broker.requestCount(), "the new selection is cached")
-}
-
-func TestConnectionNotSelectedAgainAfterTheNewSelectionFailsWithoutAnotherReread(t *testing.T) {
-	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
-	resolver := fixture.resolver(t)
-	fixture.clock.Advance(50 * time.Second)
-	fixture.writeConfiguration(t, 1, "conn-9")
-	fixture.broker.respondAlways(statusReply("CONNECTION_NOT_SELECTED"))
-	fixture.objects.reset()
-
-	_, err := resolver.Resolve(context.Background())
-	require.ErrorIs(t, err, projectconfig.ErrConnectionNotSelected)
-	require.Equal(t, 1, fixture.objects.currentHeadReads())
-	require.Equal(t, 3, fixture.broker.requestCount(), "the load, the old selection and the new one")
-}
-
-func TestConnectionNotSelectedFailsWhenTheRereadDocumentNoLongerHasTheEntry(t *testing.T) {
-	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
-	resolver := fixture.resolver(t)
-	fixture.clock.Advance(50 * time.Second)
-	_, _, err := fixture.configurations.WriteConfiguration(context.Background(), 1, projectconfig.Configuration{Connections: []projectconfig.ConnectionConfiguration{ordinaryEntry("local")}})
-	require.NoError(t, err)
-	fixture.broker.respondAlways(statusReply("CONNECTION_NOT_SELECTED"))
-
-	_, err = resolver.Resolve(context.Background())
-	require.ErrorIs(t, err, projectconfig.ErrConnectionNotSelected)
-	require.Equal(t, 2, fixture.broker.requestCount())
-}
-
-func TestChangedSelectionNeverFallsBackToTheOldConnectionsCredential(t *testing.T) {
-	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
-	resolver := fixture.resolver(t)
-	fixture.clock.Advance(50 * time.Second)
-	fixture.writeConfiguration(t, 1, "conn-9")
-	fixture.broker.respondWith(func(request brokerRequest) brokerReply {
-		if request.body["sharedConnectionId"] == "conn-9" {
-			return brokerReply{statusCode: http.StatusServiceUnavailable, raw: "{}"}
-		}
-		return statusReply("CONNECTION_NOT_SELECTED")
-	})
-
-	_, err := resolver.Resolve(context.Background())
-	require.ErrorIs(t, err, projectconfig.ErrCredentialBrokerUnavailable, "the old connection's credential has not expired but is no longer this entry's")
-
-	fixture.clock.Advance(2 * time.Second)
-	fixture.broker.respondAlways(readyReply(5, "other", fixture.clock.Now(), time.Hour))
-	value, err := resolver.Resolve(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, "other", value.Access)
-	require.Equal(t, map[string]any{"sharedConnectionId": "conn-9"}, fixture.broker.request(fixture.broker.requestCount()-1).body)
+			fixture.clock.Advance(2 * time.Second)
+			_, err = resolver.Resolve(context.Background())
+			require.ErrorIs(t, err, projectconfig.ErrConnectionNotSelected)
+			require.Equal(t, 3, fixture.broker.requestCount())
+			require.Equal(t, map[string]any{"sharedConnectionId": "conn-7"}, fixture.broker.request(2).body, "conn-9's credential never meets conn-7's settings")
+		})
+	}
 }
 
 func TestCachedCredentialKeepsWorkingWhileTheBrokerIsUnavailable(t *testing.T) {

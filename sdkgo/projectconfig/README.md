@@ -94,7 +94,7 @@ so applications built before `v1alpha3` still read it.
   application environment values. `ConfigurationStore.CreateCredentialBrokerToken`
   writes it. The application role needs read access to that object like any
   other application secret, and to `configuration/head` for scope token
-  renewal and the Preview reread below.
+  renewal.
 
 ### Wire contract
 
@@ -180,12 +180,13 @@ A shared entry then behaves like this:
   connection stays usable.
 - `REAUTHORIZATION_REQUIRED` is `ErrReauthorizationRequired`, which the
   provider package reports as `sdkgo.ErrReauthorizationRequired`.
-- `CONNECTION_NOT_SELECTED` in a Preview document rereads the current
-  `configuration/head` once and takes only this entry's `sharedConnectionId`
-  from it. If it names another shared connection, that one is read; otherwise
-  the call fails with `ErrConnectionNotSelected`. A Live document is frozen, so
-  a selection that the broker no longer allows is a platform defect: the call
-  fails with `ErrConnectionNotSelected` and nothing is reread.
+- `CONNECTION_NOT_SELECTED` fails the call with `ErrConnectionNotSelected`,
+  in Live and Preview alike, and nothing is reread. The entry keeps the
+  `sharedConnectionId` of the loaded document for the life of the process,
+  because its settings came from that document too: following a new selection
+  could send one connection's credential to another connection's endpoint. A
+  Preview that selects another connection reads it when it starts again with
+  the new document.
 - A caller that finds a stale credential that has not expired uses it at once
   while another caller's read is in flight. When no credential is cached, or it
   has expired, callers wait for that read with their own context.
@@ -194,7 +195,8 @@ A shared entry then behaves like this:
   credential is never returned.
 - Callers that arrive within 2 seconds of a failed read share its failure.
 
-A settings change reaches an application only through a new document.
+A settings change or a new selection reaches an application only through a new
+document.
 
 ### Host-kept secrets
 

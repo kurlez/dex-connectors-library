@@ -29,12 +29,11 @@ func callIDFromContext(ctx context.Context) string {
 	return callID
 }
 
-// issuedCredential is the revision of one shared connection that a provider call received.
+// issuedCredential is the revision of the shared connection that a provider call received.
 type issuedCredential struct {
-	callID             string
-	sharedConnectionID string
-	revision           uint64
-	issuedAt           time.Time
+	callID   string
+	revision uint64
+	issuedAt time.Time
 }
 
 // recordIssued remembers that the call in ctx received revision, forgetting the oldest or expired calls.
@@ -48,10 +47,10 @@ func (connection *sharedConnection) recordIssued(ctx context.Context, revision u
 	defer connection.mutex.Unlock()
 	if element, isRemembered := connection.issuedByCall[callID]; isRemembered {
 		issued := element.Value.(*issuedCredential)
-		issued.sharedConnectionID, issued.revision, issued.issuedAt = connection.sharedConnectionID, revision, now
+		issued.revision, issued.issuedAt = revision, now
 		connection.issuedOrder.MoveToBack(element)
 	} else {
-		connection.issuedByCall[callID] = connection.issuedOrder.PushBack(&issuedCredential{callID: callID, sharedConnectionID: connection.sharedConnectionID, revision: revision, issuedAt: now})
+		connection.issuedByCall[callID] = connection.issuedOrder.PushBack(&issuedCredential{callID: callID, revision: revision, issuedAt: now})
 	}
 	for oldest := connection.issuedOrder.Front(); oldest != nil; oldest = connection.issuedOrder.Front() {
 		issued := oldest.Value.(*issuedCredential)
@@ -64,7 +63,7 @@ func (connection *sharedConnection) recordIssued(ctx context.Context, revision u
 }
 
 // issuedTo returns the credential that the call in ctx received. For a call that is not remembered it assumes the
-// cached revision of the current shared connection.
+// cached revision.
 func (connection *sharedConnection) issuedTo(ctx context.Context) issuedCredential {
 	callID := callIDFromContext(ctx)
 	connection.mutex.Lock()
@@ -74,21 +73,20 @@ func (connection *sharedConnection) issuedTo(ctx context.Context) issuedCredenti
 			return issued
 		}
 	}
-	issued := issuedCredential{sharedConnectionID: connection.sharedConnectionID}
+	var issued issuedCredential
 	if connection.cached != nil {
 		issued.revision = connection.cached.revision
 	}
 	return issued
 }
 
-// supersedingCredential returns the cached credential when it is not the one issued: it has a different revision,
-// or the entry now selects another shared connection. It has not expired, so the call can use it without a forced read.
+// supersedingCredential returns the cached credential when it has a different revision than the one issued. It has not
+// expired, so the call can use it without a forced read.
 func (connection *sharedConnection) supersedingCredential(issued issuedCredential) (brokerCredential, bool) {
 	connection.mutex.Lock()
 	defer connection.mutex.Unlock()
 	if connection.cached == nil || isExpired(*connection.cached, connection.now()) || issued.revision == 0 {
 		return brokerCredential{}, false
 	}
-	isSame := issued.sharedConnectionID == connection.sharedConnectionID && issued.revision == connection.cached.revision
-	return *connection.cached, !isSame
+	return *connection.cached, issued.revision != connection.cached.revision
 }
