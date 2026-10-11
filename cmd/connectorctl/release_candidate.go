@@ -73,8 +73,8 @@ func releaseCandidateCommand(args []string) error {
 
 // planConnectorReleaseCandidate validates a candidate against main, whose checkout holds catalogPath: the commit
 // changes only the connector's own module (a new connector may also register itself and add its company logo), its
-// manifest declares the release the candidate precedes, that release is after the latest one reachable from main,
-// and the tag is free or already names the commit.
+// manifest declares the release the candidate precedes, that release is after the latest one reachable from main
+// and keeps the connections of that major version's latest release, and the tag is free or already names the commit.
 func planConnectorReleaseCandidate(catalogPath, candidateRoot, directory, commit, version string) (connectorReleaseCandidate, error) {
 	match := connectorReleaseCandidateVersionPattern.FindStringSubmatch(version)
 	if match == nil {
@@ -129,6 +129,9 @@ func planConnectorReleaseCandidate(catalogPath, candidateRoot, directory, commit
 	}
 	if !isPending {
 		return connectorReleaseCandidate{}, fmt.Errorf("%s %s is already released", directory, releaseVersion)
+	}
+	if err := validateConnectionCompatibility(repositoryRoot, *entry, latestReleases[directory], releaseVersion); err != nil {
+		return connectorReleaseCandidate{}, err
 	}
 	tag := directory + "/" + version
 	isTagPublished, err := isTagAtCommit(repositoryRoot, tag, commit)

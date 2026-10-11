@@ -182,6 +182,11 @@ func releaseMatrixCommand(args []string) error {
 		if transitionErr != nil {
 			return fmt.Errorf("%s: %w", entry.Directory, transitionErr)
 		}
+		if isPending {
+			if err := validateConnectionCompatibility(repositoryRoot, entry, latestRelease, entry.Manifest.Metadata.Version); err != nil {
+				return err
+			}
+		}
 		isPublishedAtIncludedSource := includedSourceCommit != "" && latestRelease.SourceCommit == includedSourceCommit
 		if !isPending && !*includePublished && !isPublishedAtIncludedSource {
 			continue

@@ -166,8 +166,10 @@ Every implementation plan includes Tests, Documentation, and UI/UX. Use
 - A connector PR that should release moves only that connector's version one
   step from its latest tag: patch for a fix, minor for an addition such as an
   operation or mocks, and for a breaking change `(breaking)` with a minor bump
-  before v1 or a major bump from v1. First releases use `v0.1.0`. Tooling
-  accepts a skipped step or another first version, so review checks both.
+  before v1 or a major bump from v1. A change that breaks connections, as
+  `docs/versioning-and-releases.md` defines, is a major bump also before v1:
+  v0 releases `v1.0.0`. First releases use `v0.1.0`. Tooling accepts a skipped
+  step or another first version, so review checks both.
 - Core SDK tags use `sdkgo/vX.Y.Z`. Connector tags use the module directory,
   such as `connectors/openai/vX.Y.Z`.
 - Connector modules require an exact published Connector Go SDK release.

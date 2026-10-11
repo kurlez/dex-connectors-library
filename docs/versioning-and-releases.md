@@ -36,14 +36,60 @@ A connector pull request that should release moves only that connector's
 - a minor, such as `v0.21.0` to `v0.22.0`, for an addition such as an
   operation, a Trigger, a UI unit, or mocks;
 - for a breaking change, the exact `(breaking)` marker and a minor bump before
-  v1, or a major bump and module-path migration at v1 or later.
+  v1, or a major bump at v1 or later;
+- for a change that breaks connections, the `(breaking)` marker and a major
+  bump, also before v1; see
+  [Connection compatibility](#connection-compatibility).
 
 A new connector declares `v0.1.0` for its first release.
 
 `connectorctl` and the release workflow reject a version that is not a stable
-semantic version or is behind the connector's latest reachable tag, and a
-`(breaking)` release with too small a bump. They accept a version that skips a
-step and a first release other than `v0.1.0`, so review checks both.
+semantic version or is behind the connector's latest reachable tag, a release
+that breaks connections without a major bump, and a `(breaking)` release with
+too small a bump. They accept a version that skips a step and a first release
+other than `v0.1.0`, so review checks both.
+
+## Connection compatibility
+
+A connection holds a connector's authentication method, its credential, and
+its settings. The minor and patch releases of a major version keep every
+connection of that major version working, so an application upgrades within a
+major version without authorizing again:
+
+- every authentication method keeps its ID, its type, its credential fields
+  (name, type, whether each is required, and enum values), and its OAuth
+  `scopes` and `userScopes`, or the setting that `scopes` names with
+  `{fromSetting}`;
+- `spec.auth.defaultMethod` stays the same, because a credential saved without
+  a method uses the default method;
+- the settings, `spec.configuration` and each method's `configuration`, only
+  gain optional fields: none is removed, renamed, retyped, or made required,
+  and no enum value is removed.
+
+A release may add an authentication method. A single `spec.auth` method may
+move to `spec.auth.methods` when the `defaultMethod` keeps its contract.
+Descriptions, defaults, guides, and endpoints are not part of the connection
+contract, and neither are Go names, though renaming one breaks the Go API.
+
+Any other change to the connection contract is a new major version, also
+before v1: a v0 connector that breaks its connections releases `v1.0.0`, and
+the Go module path changes only from v2. Other breaking changes before v1 keep
+the minor bump. Adding an operation or a Trigger stays a minor release as long
+as it needs no new OAuth scope. A hosting platform that authorizes connections
+with its own registered OAuth application can use a version that adds a scope
+only after the provider verifies that application again for the new scope.
+
+The rule holds from the first release of a major version. Until then, the
+release candidates of that major version may still change its contract from one
+candidate to the next.
+
+`connectorctl` enforces the rule. It compares a manifest with the manifest of
+the latest release of the same major version reachable from `main`, and skips
+the comparison when that major version has no release yet. `connectorctl release-matrix` applies it to every
+pending release, so `make catalog-check` checks a pull request and the release
+workflow checks `main` before it publishes anything. `connectorctl
+release-candidate` applies it to every candidate. A rejection lists each break
+and names the major version the change needs.
 
 ## Dex versions
 
@@ -125,7 +171,7 @@ the original push commit, retaining its release matrix. The workflow:
    `go.sum`, and that each required connector release carries
    `connector-release.complete`;
 5. verifies the declared version is later than the connector's latest
-   release;
+   release and keeps the connections of its major version;
 6. includes only commits that changed that connector directory;
 7. builds and tests an optional Connector Studio UI;
 8. uploads `connector-release.json`, optional `connector-ui.tgz`, and digests;
@@ -186,7 +232,8 @@ change it. It:
    `main` (a new connector also adds its `catalog.yaml` entry and, for a new
    company, its `logo.svg`); its catalog validates; the manifest declares
    `vX.Y.Z`; `vX.Y.Z` is after the connector's latest release reachable from
-   `main`; and the tag is free or already names the commit;
+   `main` and keeps the connections of its major version's latest release; and
+   the tag is free or already names the commit;
 2. verifies the commit with a read-only token, the only job that runs the
    candidate's code: generated code, the SDK and connector dependency rules,
    `go test -race` and `go vet` with `GOWORK=off`, the Current compatibility
