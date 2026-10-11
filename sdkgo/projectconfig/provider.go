@@ -54,11 +54,16 @@ const refreshTimeout = 30 * time.Second
 // CredentialResolver resolves credentials per call and refreshes them during actual use when they are known to be
 // expired or the driver requires a refresh.
 // It coordinates through conditional object writes, not process-local locks, timers, or a broker.
+//
+// An entry that the loaded document marks with sharedConnectionId resolves from the credential broker instead:
+// it caches what the broker serves, reads again when the credential is stale, never reads or writes the
+// stored connection and never calls the refresh driver.
 type CredentialResolver[C any] struct {
 	store  *ConnectionStore
 	key    ConnectionKey
 	decode CredentialDecoder[C]
 	encode CredentialEncoder[C]
+	shared *sharedConnection
 }
 
 // NewCredentialResolver binds one project connection without reading credentials or contacting a provider.
@@ -70,12 +75,19 @@ func NewCredentialResolver[C any](store *ConnectionStore, key ConnectionKey, dec
 	if _, err := store.connectionPath(key); err != nil {
 		return nil, err
 	}
-	return &CredentialResolver[C]{store: store, key: key, decode: decode, encode: encode}, nil
+	resolver := &CredentialResolver[C]{store: store, key: key, decode: decode, encode: encode}
+	if store.shared != nil {
+		resolver.shared = store.shared.entries[key]
+	}
+	return resolver, nil
 }
 
 // Resolve reads exact current material without refreshing; known-expired credentials require ResolveWithRefresh.
 func (provider *CredentialResolver[C]) Resolve(ctx context.Context) (C, error) {
 	var zero C
+	if provider.shared != nil {
+		return provider.resolveShared(ctx)
+	}
 	material, connection, err := provider.store.ReadCredentialMaterial(ctx, provider.key)
 	if err != nil {
 		return zero, err
@@ -96,6 +108,9 @@ func (provider *CredentialResolver[C]) ResolveWithRefresh(ctx context.Context, d
 	var zero C
 	if ctx == nil || driver == nil {
 		return zero, errors.New("credential context and refresh driver are required")
+	}
+	if provider.shared != nil {
+		return provider.resolveShared(ctx)
 	}
 	if provider.encode == nil {
 		return zero, errors.New("project credential refresh requires an encoder")
@@ -174,6 +189,13 @@ func (provider *CredentialResolver[C]) ResolveWithRefresh(ctx context.Context, d
 // A generic HTTP 401, permission error, or unknown expiry is insufficient evidence for an extra provider mutation.
 func (provider *CredentialResolver[C]) ResolveAfterRejection(ctx context.Context, driver RefreshDriver[C]) (C, error) {
 	var zero C
+	if provider.shared != nil {
+		credential, err := provider.shared.credentialAfterRejection(ctx)
+		if err != nil {
+			return zero, err
+		}
+		return provider.decodeShared(credential)
+	}
 	connection, err := provider.store.ReadConnection(ctx, provider.key)
 	if err != nil {
 		return zero, err
@@ -182,6 +204,24 @@ func (provider *CredentialResolver[C]) ResolveAfterRejection(ctx context.Context
 		return zero, errors.New("authentication rejection does not prove credential expiry")
 	}
 	return provider.ResolveWithRefresh(ctx, driver)
+}
+
+func (provider *CredentialResolver[C]) resolveShared(ctx context.Context) (C, error) {
+	var zero C
+	credential, err := provider.shared.credential(ctx)
+	if err != nil {
+		return zero, err
+	}
+	return provider.decodeShared(credential)
+}
+
+func (provider *CredentialResolver[C]) decodeShared(credential brokerCredential) (C, error) {
+	credentials, err := provider.decode(credential.credential)
+	if err != nil {
+		var zero C
+		return zero, errors.New("project credential decoding failed")
+	}
+	return credentials, nil
 }
 
 func (provider *CredentialResolver[C]) refreshAdmitted(ctx context.Context, admission ExchangeAdmission, prior CredentialMaterial, state RefreshState[C], driver RefreshDriver[C]) (C, error) {

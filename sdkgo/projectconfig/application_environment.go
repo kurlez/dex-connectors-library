@@ -147,6 +147,10 @@ func (store *ConfigurationStore) CreateApplicationSecret(ctx context.Context, na
 	if !IsApplicationEnvironmentName(name) || !validEnvironmentValue(value) {
 		return ApplicationSecretRef{}, errors.New("invalid application secret")
 	}
+	return store.createSecretObject(ctx, name, value)
+}
+
+func (store *ConfigurationStore) createSecretObject(ctx context.Context, name, value string) (ApplicationSecretRef, error) {
 	identifier := make([]byte, 16)
 	if _, err := rand.Read(identifier); err != nil {
 		return ApplicationSecretRef{}, errors.New("application secret identity unavailable")
@@ -191,18 +195,26 @@ func (store *ConfigurationStore) ResolveApplicationEnvironment(ctx context.Conte
 			values[name] = *entry.Value
 			continue
 		}
-		reference := entry.SecretRef
-		object, err := store.objects.ReadObject(ctx, reference.Key, reference.Version)
+		value, err := store.readSecretValue(ctx, *entry.SecretRef, name)
 		if err != nil {
 			return ApplicationEnvironment{}, err
 		}
-		var secret applicationSecret
-		if object.Key != reference.Key || object.Version != reference.Version || "sha256:"+digestBytes(object.Contents) != reference.Digest || strictJSON(object.Contents, &secret) != nil || secret.Scope != store.scope || secret.Name != name || !validEnvironmentValue(secret.Value) {
-			return ApplicationEnvironment{}, errors.New("application secret integrity or scope differs")
-		}
-		values[name] = secret.Value
+		values[name] = value
 	}
 	return ApplicationEnvironment{values: values}, nil
+}
+
+// readSecretValue reads one pinned private object and verifies its version, digest, scope and name.
+func (store *ConfigurationStore) readSecretValue(ctx context.Context, reference ApplicationSecretRef, name string) (string, error) {
+	object, err := store.objects.ReadObject(ctx, reference.Key, reference.Version)
+	if err != nil {
+		return "", err
+	}
+	var secret applicationSecret
+	if object.Key != reference.Key || object.Version != reference.Version || "sha256:"+digestBytes(object.Contents) != reference.Digest || strictJSON(object.Contents, &secret) != nil || secret.Scope != store.scope || secret.Name != name || !validEnvironmentValue(secret.Value) {
+		return "", errors.New("application secret integrity or scope differs")
+	}
+	return secret.Value, nil
 }
 
 // ValidateApplicationEnvironment checks all configured fields against the exact source declarations and pinned private values.
