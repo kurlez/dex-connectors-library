@@ -396,6 +396,9 @@ func (manifest Manifest) Validate() error {
 	if mintsAccessToken(manifest.Spec.Auth) && !manifest.Spec.Auth.Refreshable {
 		problems = append(problems, "spec.auth.refreshable must be true when a method declares clientCredentials or serviceAccount.jwtBearer")
 	}
+	if manifest.Spec.Auth.Refreshable && !mapsRefreshToken(manifest.Spec.Auth) && !mintsAccessToken(manifest.Spec.Auth) {
+		problems = append(problems, "spec.auth.refreshable requires a method that maps a refresh token or declares clientCredentials or serviceAccount.jwtBearer, so a host knows how to refresh it")
+	}
 	if manifest.Kind != "Connector" {
 		problems = append(problems, "kind must be Connector")
 	}

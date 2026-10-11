@@ -148,3 +148,9 @@ func TestTokenGrantDeclarationsRejectInvalidReferences(t *testing.T) {
 		})
 	}
 }
+
+func TestRefreshableRequiresADeclaredGrant(t *testing.T) {
+	contents := strings.Replace(readFixture(t, "google-oauth.yaml"), "  auth:\n", "  auth:\n    refreshable: true\n", 1)
+	_, err := schema.Decode(strings.NewReader(contents))
+	require.ErrorContains(t, err, "spec.auth.refreshable requires a method that maps a refresh token or declares clientCredentials or serviceAccount.jwtBearer")
+}
