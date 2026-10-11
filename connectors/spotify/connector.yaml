@@ -73,6 +73,9 @@ spec:
         - {credential: access_token, source: access_token}
         - {credential: refresh_token, source: refresh_token}
       pkce: true
+      tokenEndpointAuthMethod: client_secret_basic
+      refresh:
+        terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client, access_denied]
   operations:
     - name: listPlaylistTracks
       goName: ListPlaylistTracks
