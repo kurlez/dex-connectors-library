@@ -302,8 +302,12 @@ responses map into credentials. A method declares one of three grants:
 - a `serviceAccount` method with `serviceAccount.jwtBearer` mints with a
   signed JWT bearer assertion.
 
-A method without one, such as a plain API key, keeps its credential as stored.
-A manifest whose methods declare a grant sets `auth.refreshable: true`.
+A method without one, such as a plain API key, keeps its credential as stored,
+so a method whose credential expires must declare its grant. `auth.refreshable`
+is true exactly when some method declares one, and a generated test fails when
+a connector's credential refresh driver calls a token endpoint for a method
+without a declaration (see
+[Credential refresh agreement](#credential-refresh-agreement)).
 
 Every grant shares these rules:
 
@@ -363,14 +367,28 @@ oauth2:
 
 Without `refresh`, a method that maps `refresh_token` refreshes with
 `terminalErrorCodes: [invalid_grant]`, `missingExpiry: keep`, and no
-additional parameters. A host checks the granted scopes that a refresh
-response reports the way it checks the authorization response: against
-`scopes`.
+additional parameters.
+
+The scopes of a refresh response follow RFC 6749 section 5.1:
+
+- a response without `scope` (or a `scopes` array) keeps the granted scopes
+  unchanged;
+- a response that reports scopes that no longer cover the declared `scopes`
+  needs reauthorization, as a terminal error code does. Providers that never
+  report `offline_access` need not report it.
 
 A method that stores several refresh tokens, such as a bot token and a user
-token, lists one grant for each. A grant whose refresh token is blank is
-skipped, and the connection expires with its earliest token. A grant with
-`grantedScopes: userScopes` is checked against `userScopes` instead:
+token, lists one grant for each, and the grants refresh independently:
+
+- each grant's response sets the expiry of the tokens it maps;
+- a host refreshes a grant when that grant's own token nears expiry, never
+  because another grant does, since every needless rotation of a single-use
+  refresh token widens the window in which a lost response loses the token;
+- a grant whose refresh token is blank is skipped;
+- the connection reports the earliest expiry of its tokens.
+
+A grant with `grantedScopes: userScopes` checks the scopes its response reports
+against `userScopes` instead of `scopes`:
 
 ```yaml
 refresh:
@@ -462,6 +480,49 @@ A literal or translated token endpoint is an absolute HTTPS URL. A host checks
 an endpoint that it reads from a credential, setting, or key before it sends a
 secret there. Release metadata writes a literal as a JSON string, every other
 source as an object, and `missingExpiry` as `"keep"` or `{"lifetime": "2h"}`.
+
+### Credential refresh agreement
+
+A connector keeps its hand-written `CredentialRefreshDriver` for applications
+that refresh in process, so its declarations and its driver must agree.
+`connectorctl generate` writes `zz_generated_credential_refresh_test.go` beside
+every manifest that declares a grant. The test runs the driver against a stub
+token endpoint, through the HTTP client it passes to
+`NewCredentialRefreshDriver`, and for every declared grant checks that:
+
+- the driver sends one request to the declared token endpoint, with the
+  declared encoding, client authentication, grant parameters, additional
+  parameters, and, for a JWT bearer grant, an assertion signed by the stored
+  key with the declared claims;
+- a successful response changes exactly the credentials that
+  `credentialMappings` and `credentialCopies` name, and the expiry follows
+  `expires_in`;
+- a response without `refresh_token` keeps the stored refresh token;
+- an error code is terminal exactly when the grant declares it, among the
+  declared codes and the common RFC 6749 and provider codes;
+- a response without `expires_in` takes the declared `missingExpiry`
+  lifetime, or, for `keep`, never needs reauthorization;
+- a connection without its optional client secret sends a public client
+  request, or the driver refuses it with a reauthorization error.
+
+It also checks that the driver sends no token request for a method that
+declares no grant. `go test` of the connector runs it in pull requests, before
+a release, and before a release candidate, and `connectorctl generate --check`
+fails when it is stale.
+
+A driver may check more than the declarations, such as the scopes a response
+reports or a provider-owned API domain. When such a check rejects the test's
+sample values, `testdata/credential-refresh-samples.json` overrides them for
+every grant (`"*"`), a method (its ID, or `spec.auth`), or one grant (the test
+case name, such as `"spec.auth refresh bot_refresh_token"`):
+
+```json
+{"*": {"response": {"api_domain": "https://example.pipedrive.com"}}}
+```
+
+A driver whose constructor takes a connection setting that a declaration reads
+gets it from `newCredentialRefreshDriverWithSettings(httpClient, settings)`,
+which the connector writes in a test file of its external test package.
 
 ## Studio setup bundle
 

@@ -367,7 +367,15 @@ func generate(args []string) error {
 	if err != nil {
 		return err
 	}
+	refreshAgreementFiles, err := generatedRefreshAgreementFiles(args[0], manifest)
+	if err != nil {
+		return err
+	}
+	for path, contents := range refreshAgreementFiles {
+		mockFiles[path] = contents
+	}
 	stale := staleMockFiles(args[0], manifest)
+	staleRefreshAgreement := staleRefreshAgreementFiles(args[0], manifest)
 	if check {
 		current, readErr := os.ReadFile(output)
 		if readErr != nil {
@@ -379,12 +387,15 @@ func generate(args []string) error {
 		if len(stale) > 0 {
 			return fmt.Errorf("generated mock package is stale because the manifest declares no mocks: %s", stale[0])
 		}
+		if len(staleRefreshAgreement) > 0 {
+			return fmt.Errorf("generated credential refresh agreement test is stale because the manifest declares no token grants: %s", staleRefreshAgreement[0])
+		}
 		return checkGeneratedFiles(mockFiles)
 	}
 	if err := os.WriteFile(output, generated, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", output, err)
 	}
-	for _, path := range stale {
+	for _, path := range append(stale, staleRefreshAgreement...) {
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("remove stale %s: %w", path, err)
 		}
