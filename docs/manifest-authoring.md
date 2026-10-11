@@ -108,6 +108,48 @@ response. Keep secret
 fields typed as `secretString` so code generation constructs `SecretString`
 at the provider boundary.
 
+### Endpoints and scopes from connection settings
+
+A connector for an OAuth 2.0 or OpenID Connect server that the connection owner
+chooses cannot know the server's URLs. `authorizationEndpoint`,
+`tokenEndpoint`, the `oidc` `issuer`, `discoveryEndpoint` and
+`userInfoEndpoint`, a `credentialDerivations` `endpoint`, and `scopes` may each
+name a connection setting instead of a constant:
+
+```yaml
+configuration:
+  fields:
+    - {name: authorizationEndpoint, goName: AuthorizationEndpoint, type: url, description: "...", required: true}
+    - {name: tokenEndpoint, goName: TokenEndpoint, type: url, description: "...", required: true}
+    - {name: scopes, goName: Scopes, type: stringList, description: "...", required: true}
+auth:
+  type: oauth2
+  oauth2:
+    authorizationEndpoint: {fromSetting: authorizationEndpoint}
+    tokenEndpoint: {fromSetting: tokenEndpoint}
+    scopes: {fromSetting: scopes}
+    pkce: true
+```
+
+`fromSetting` is the only key of the mapping. It names a `required: true`
+configuration field of type `url` for an endpoint and `stringList` for
+`scopes`. A single-method `spec.auth` reads `spec.configuration`; a method in
+`auth.methods` reads `spec.configuration` and its own `configuration.fields`,
+never another method's. The value is a connection setting, so it is never
+secret, and the connection stores it under the field name. A field that
+supplies an endpoint needs no default: the connection owner enters it.
+
+An endpoint written as a string keeps today's rule: an absolute HTTPS URL. An
+endpoint that names a setting carries no scheme rule in the library, because
+only the consumer knows where the value comes from. The consumer that reads
+the setting decides whether plain HTTP is acceptable, such as for an identity
+provider on a private network. Generated `Config.Validate` requires only an
+absolute URL for a `url` field.
+
+Release metadata writes a fixed endpoint or scope list as before and a
+reference as `{"fromSetting": "<field name>"}`, so a consumer that reads the
+metadata must accept both forms for every field above.
+
 ### Multiple authentication methods
 
 Use `auth.methods` when one named connection can use more than one provider

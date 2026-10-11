@@ -74,7 +74,7 @@ func TestRegisteredGoogleConnectorsRequestNoAliasOAuthScopes(t *testing.T) {
 				continue
 			}
 			checkedConnector = true
-			for _, scope := range append(append([]string{}, oauth.Scopes...), oauth.UserScopes...) {
+			for _, scope := range append(append([]string{}, oauth.Scopes.Values...), oauth.UserScopes...) {
 				canonicalScope, isGoogleAlias := canonicalScopeByGoogleAlias[scope]
 				require.Falsef(t, isGoogleAlias, "%s requests Google alias scope %q; request %q instead", entry.Directory, scope, canonicalScope)
 			}
