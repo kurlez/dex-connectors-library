@@ -93,7 +93,8 @@ so applications built before `v1alpha3` still read it.
   `DEX_CREDENTIAL_BROKER_TOKEN`. The reserved prefix keeps it apart from
   application environment values. `ConfigurationStore.CreateCredentialBrokerToken`
   writes it. The application role needs read access to that object like any
-  other application secret, and to `configuration/head` for the reread below.
+  other application secret, and to `configuration/head` for scope token
+  renewal and the Preview reread below.
 
 ### Wire contract
 
@@ -175,10 +176,12 @@ A shared entry then behaves like this:
   connection stays usable.
 - `REAUTHORIZATION_REQUIRED` is `ErrReauthorizationRequired`, which the
   provider package reports as `sdkgo.ErrReauthorizationRequired`.
-- `CONNECTION_NOT_SELECTED` rereads the current `configuration/head` once and
-  takes only this entry's `sharedConnectionId` from it. If it names another
-  shared connection, that one is read; otherwise the call fails with
-  `ErrConnectionNotSelected`.
+- `CONNECTION_NOT_SELECTED` in a Preview document rereads the current
+  `configuration/head` once and takes only this entry's `sharedConnectionId`
+  from it. If it names another shared connection, that one is read; otherwise
+  the call fails with `ErrConnectionNotSelected`. A Live document is frozen, so
+  a selection that the broker no longer allows is a platform defect: the call
+  fails with `ErrConnectionNotSelected` and nothing is reread.
 - A caller that finds a stale credential that has not expired uses it at once
   while another caller's read is in flight. When no credential is cached, or it
   has expired, callers wait for that read with their own context.

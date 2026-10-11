@@ -306,8 +306,28 @@ func TestReauthorizationRequiredIsReportedAndClearsTheCache(t *testing.T) {
 	require.Equal(t, "second", value.Access)
 }
 
-func TestConnectionNotSelectedRereadsTheConfigurationDocumentOnceThenFails(t *testing.T) {
+func TestConnectionNotSelectedInALiveDocumentIsTerminalAndNeverRereadsTheConfiguration(t *testing.T) {
 	fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
+	resolver := fixture.resolver(t)
+	fixture.clock.Advance(50 * time.Second)
+	fixture.writeConfiguration(t, 1, "conn-9")
+	fixture.broker.respondAlways(statusReply("CONNECTION_NOT_SELECTED"))
+	fixture.objects.reset()
+
+	_, err := resolver.Resolve(context.Background())
+	require.ErrorIs(t, err, projectconfig.ErrConnectionNotSelected)
+	require.Zero(t, fixture.objects.currentHeadReads(), "a frozen Live document has no other selection to follow")
+	require.Equal(t, 2, fixture.broker.requestCount(), "the warm read and the one that was refused")
+
+	fixture.clock.Advance(2 * time.Second)
+	_, err = resolver.Resolve(context.Background())
+	require.ErrorIs(t, err, projectconfig.ErrConnectionNotSelected)
+	require.Equal(t, 3, fixture.broker.requestCount())
+	require.Equal(t, map[string]any{"sharedConnectionId": "conn-7"}, fixture.broker.request(2).body, "the entry keeps its frozen selection")
+}
+
+func TestConnectionNotSelectedRereadsTheConfigurationDocumentOnceThenFails(t *testing.T) {
+	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
 	resolver := fixture.resolver(t)
 	fixture.clock.Advance(50 * time.Second)
 	fixture.broker.respondAlways(statusReply("CONNECTION_NOT_SELECTED"))
@@ -320,7 +340,7 @@ func TestConnectionNotSelectedRereadsTheConfigurationDocumentOnceThenFails(t *te
 }
 
 func TestConnectionNotSelectedFollowsTheSelectionOfTheRereadDocument(t *testing.T) {
-	fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
+	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
 	resolver := fixture.resolver(t)
 	fixture.clock.Advance(50 * time.Second)
 	fixture.writeConfiguration(t, 1, "conn-9")
@@ -346,7 +366,7 @@ func TestConnectionNotSelectedFollowsTheSelectionOfTheRereadDocument(t *testing.
 }
 
 func TestConnectionNotSelectedAgainAfterTheNewSelectionFailsWithoutAnotherReread(t *testing.T) {
-	fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
+	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
 	resolver := fixture.resolver(t)
 	fixture.clock.Advance(50 * time.Second)
 	fixture.writeConfiguration(t, 1, "conn-9")
@@ -360,7 +380,7 @@ func TestConnectionNotSelectedAgainAfterTheNewSelectionFailsWithoutAnotherReread
 }
 
 func TestConnectionNotSelectedFailsWhenTheRereadDocumentNoLongerHasTheEntry(t *testing.T) {
-	fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
+	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
 	resolver := fixture.resolver(t)
 	fixture.clock.Advance(50 * time.Second)
 	_, _, err := fixture.configurations.WriteConfiguration(context.Background(), 1, projectconfig.Configuration{Connections: []projectconfig.ConnectionConfiguration{ordinaryEntry("local")}})
@@ -373,7 +393,7 @@ func TestConnectionNotSelectedFailsWhenTheRereadDocumentNoLongerHasTheEntry(t *t
 }
 
 func TestChangedSelectionNeverFallsBackToTheOldConnectionsCredential(t *testing.T) {
-	fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
+	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
 	resolver := fixture.resolver(t)
 	fixture.clock.Advance(50 * time.Second)
 	fixture.writeConfiguration(t, 1, "conn-9")

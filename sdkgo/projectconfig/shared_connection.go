@@ -56,6 +56,7 @@ func newSharedConnections(config *sharedConnectionsConfig) *sharedConnections {
 			broker: broker, configurations: config.configurations, key: key, now: config.now,
 			readSlot: make(chan struct{}, 1), sharedConnectionID: connection.SharedConnectionID,
 			issuedByCall: map[string]*list.Element{}, issuedOrder: list.New(),
+			canFollowSelection: config.configuration.Scope.Kind == scopeKindPreview,
 		}
 	}
 	return shared
@@ -67,6 +68,8 @@ type sharedConnection struct {
 	configurations *ConfigurationStore
 	key            ConnectionKey
 	now            func() time.Time
+	// canFollowSelection is true for a Preview document, which may select another connection. A Live document is frozen.
+	canFollowSelection bool
 	// readSlot admits one read at a time; waiters honor their own context and then reuse its result.
 	readSlot chan struct{}
 
@@ -172,6 +175,9 @@ func (connection *sharedConnection) read(ctx context.Context, rejectedRevision u
 			return brokerCredential{}, ErrReauthorizationRequired
 		}
 		connection.forget()
+		if !connection.canFollowSelection {
+			return brokerCredential{}, fmt.Errorf("%w: a Live configuration is frozen and cannot select another connection", ErrConnectionNotSelected)
+		}
 		if hasRereadConfiguration {
 			return brokerCredential{}, ErrConnectionNotSelected
 		}
