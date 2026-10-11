@@ -74,6 +74,8 @@ spec:
         - {credential: access_token, source: access_token}
         - {credential: refresh_token, source: refresh_token}
       pkce: true
+      refresh:
+        terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
   studio:
     setup:
       entrypoint: index.html

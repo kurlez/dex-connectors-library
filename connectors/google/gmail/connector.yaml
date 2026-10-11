@@ -99,6 +99,8 @@ spec:
           credentialDerivations:
             - {credential: primary_email, endpoint: https://openidconnect.googleapis.com/v1/userinfo, source: email, verifiedBy: email_verified}
           pkce: true
+          refresh:
+            terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
       - id: workspace-domain-delegation
         displayName: Workspace domain-wide delegation
         description: Advanced administrator-only method for a Google Workspace domain; the service account mints delegated user tokens without interactive consent.
@@ -132,6 +134,21 @@ spec:
             - Open the service account > Keys > Add key > Create new key > JSON, download the one-time private key, and paste the complete JSON document into the secret field.
             - Copy the service account OAuth 2 Client ID, then open https://admin.google.com/ac/owl/domainwidedelegation and add that client ID with the displayed Gmail readonly and send scopes.
             - Enter one managed Workspace mailbox as delegated_user; personal @gmail.com accounts and Workspace users without administrator-approved delegation cannot use this method.
+        serviceAccount:
+          jwtBearer:
+            keyCredential: service_account_key
+            privateKey: {fromKey: private_key}
+            issuer: {fromKey: client_email}
+            subject: {fromCredential: delegated_user}
+            audience: {fromKey: token_uri}
+            tokenEndpoint: {fromKey: token_uri}
+            scopes: [https://www.googleapis.com/auth/gmail.readonly, https://www.googleapis.com/auth/gmail.send]
+            lifetime: 1h
+            credentialMappings:
+              - {credential: access_token, source: access_token}
+            credentialCopies:
+              - {credential: primary_email, fromCredential: delegated_user}
+            terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
   studio:
     setup:
       entrypoint: index.html

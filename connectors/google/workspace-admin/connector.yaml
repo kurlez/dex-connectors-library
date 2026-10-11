@@ -65,6 +65,19 @@ spec:
             - Open the service account > Keys > Add key > Create new key > JSON, download the one-time private key, and paste the complete JSON document into the secret field.
             - As a super administrator, open https://admin.google.com/ac/owl/domainwidedelegation (Security > Access and data control > API controls > Manage Domain Wide Delegation), choose Add new, paste the client ID, enter the displayed admin.directory.user and admin.directory.group.member scopes, and choose Authorize; Google says the change can take up to 24 hours.
             - Enter as delegated_user an administrator with the User Management Admin and Groups Admin roles; a User Management Admin cannot change administrator accounts, so use a super administrator only when Flows must manage administrators.
+        serviceAccount:
+          jwtBearer:
+            keyCredential: service_account_key
+            privateKey: {fromKey: private_key}
+            issuer: {fromKey: client_email}
+            subject: {fromCredential: delegated_user}
+            audience: {fromKey: token_uri}
+            tokenEndpoint: {fromKey: token_uri}
+            scopes: [https://www.googleapis.com/auth/admin.directory.user, https://www.googleapis.com/auth/admin.directory.group.member]
+            lifetime: 1h
+            credentialMappings:
+              - {credential: access_token, source: access_token}
+            terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
       - id: google-oauth
         displayName: Google OAuth as an administrator
         description: Interactive consent by one Workspace administrator; Dex refreshes the short-lived access token, and every operation runs with that administrator's privileges.
@@ -109,6 +122,8 @@ spec:
             - {credential: access_token, source: access_token}
             - {credential: refresh_token, source: refresh_token}
           pkce: true
+          refresh:
+            terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
   operations:
     - name: getUser
       goName: GetUser
