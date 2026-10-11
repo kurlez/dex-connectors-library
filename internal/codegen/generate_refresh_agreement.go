@@ -173,12 +173,12 @@ func declaredGrants(manifest schema.Manifest) []declaredGrant {
 				if len(refresh.Grants) > 0 {
 					name += " " + refreshGrant.RefreshTokenCredential
 				}
-				responseScopes := oauth.Scopes.Values
+				responseScopes := oauth.Scopes.List
 				if refreshGrant.GrantedScopes == schema.UserScopes {
 					responseScopes = oauth.UserScopes
 				}
 				grants = append(grants, declaredGrant{
-					name: name, methodLabel: label, method: method, kind: "refresh", endpoint: schema.ValueSource{Value: oauth.TokenEndpoint.URL},
+					name: name, methodLabel: label, method: method, kind: "refresh", endpoint: oauth.TokenEndpoint,
 					authMethod: clientAuthentication(oauth.TokenEndpointAuthMethod), encoding: defaultString(oauth.TokenRequestEncoding, schema.FormTokenRequestEncoding),
 					clientID: oauth.ClientIDCredential, clientSecret: oauth.ClientSecretCredential, refreshToken: refreshGrant.RefreshTokenCredential,
 					mappings: refreshGrant.CredentialMappings, responseScopes: withoutString(responseScopes, offlineAccessScope),
@@ -472,6 +472,9 @@ func (agreement *refreshAgreementGenerator) sampleSettings(grant declaredGrant, 
 		if enumField, isEnum := agreement.enumField(grant.method, source.FromSetting); isEnum {
 			settings[source.FromSetting] = enumField.Enum[0]
 		}
+		if agreement.isURLSetting(grant.method, source.FromSetting) {
+			settings[source.FromSetting] = "https://manifest.example.com/" + source.FromSetting
+		}
 	}
 	for _, placeholder := range agreement.templatePlaceholders(grant) {
 		if !agreement.isMethodCredential(grant.method, placeholder) {
@@ -589,6 +592,20 @@ func (agreement *refreshAgreementGenerator) enumField(method schema.AuthMethod, 
 		}
 	}
 	return schema.Field{}, false
+}
+
+// isURLSetting reports whether name names a url setting of method.
+func (agreement *refreshAgreementGenerator) isURLSetting(method schema.AuthMethod, name string) bool {
+	fields := append([]schema.Field{}, agreement.manifest.Spec.Configuration.Fields...)
+	if method.Configuration != nil {
+		fields = append(fields, method.Configuration.Fields...)
+	}
+	for _, field := range fields {
+		if field.Name == name {
+			return field.Type == "url"
+		}
+	}
+	return false
 }
 
 func (agreement *refreshAgreementGenerator) isMethodCredential(method schema.AuthMethod, name string) bool {

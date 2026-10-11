@@ -4,6 +4,7 @@
 package schema
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -142,12 +143,15 @@ type CredentialCopy struct {
 	FromCredential string `yaml:"fromCredential" json:"fromCredential"`
 }
 
-// ValueSource is a value that a host resolves from the connection when it mints or refreshes. Exactly one of
-// Value, FromCredential, FromSetting, FromKey and Template is set. In YAML and JSON a literal is a plain string and
-// every other source a mapping, such as {fromKey: client_email}.
+// ValueSource is a value that a host resolves from the connection: an OAuth endpoint or scope list, a token request
+// setting, or a JWT bearer claim. Exactly one of Value, List, FromCredential, FromSetting, FromKey and Template is
+// set. In YAML and JSON a literal is a plain string, a literal list a plain array, and every other source a
+// mapping, such as {fromSetting: tokenEndpoint}.
 type ValueSource struct {
-	// Value is a literal.
-	Value string `json:"-"`
+	// Value is a literal string.
+	Value string `yaml:"-" json:"-"`
+	// List is a literal list, such as fixed OAuth scopes.
+	List []string `yaml:"-" json:"-"`
 	// FromCredential names a credential field of the method.
 	FromCredential string `yaml:"fromCredential,omitempty" json:"fromCredential,omitempty"`
 	// FromSetting names a connection setting: a spec.configuration field or one of the method's configuration fields.
@@ -212,41 +216,87 @@ func (missingExpiry *MissingExpiry) UnmarshalJSON(contents []byte) error {
 	return nil
 }
 
-// UnmarshalYAML reads a literal string or a source mapping.
+// UnmarshalYAML reads a literal string, a literal list or a source mapping.
 func (source *ValueSource) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind == yaml.ScalarNode {
+	switch node.Kind {
+	case yaml.ScalarNode:
 		*source = ValueSource{Value: node.Value}
+		return nil
+	case yaml.SequenceNode:
+		var list []string
+		if err := node.Decode(&list); err != nil {
+			return fmt.Errorf("line %d: a value source list must hold strings: %w", node.Line, err)
+		}
+		*source = ValueSource{List: list}
 		return nil
 	}
 	type valueSourceMapping ValueSource
 	var mapping valueSourceMapping
 	if err := decodeKnownYAMLMapping(node, &mapping, "fromCredential", "fromSetting", "fromKey", "template", "values"); err != nil {
-		return fmt.Errorf("value source: %w", err)
+		return fmt.Errorf("line %d: value source: %w", node.Line, err)
 	}
 	*source = ValueSource(mapping)
 	return nil
 }
 
-// MarshalJSON writes a literal as a string and every other source as an object.
+// MarshalYAML writes a literal as a string, a literal list as a sequence and every other source as a mapping.
+func (source ValueSource) MarshalYAML() (any, error) {
+	switch {
+	case source.Value != "":
+		return source.Value, nil
+	case source.List != nil:
+		return source.List, nil
+	}
+	type valueSourceMapping ValueSource
+	return valueSourceMapping(source), nil
+}
+
+// MarshalJSON writes a literal as a string, a literal list as an array and every other source as an object.
 func (source ValueSource) MarshalJSON() ([]byte, error) {
-	if source.Value != "" {
+	switch {
+	case source.Value != "":
 		return json.Marshal(source.Value)
+	case source.List != nil:
+		return json.Marshal(source.List)
 	}
 	type valueSourceMapping ValueSource
 	return json.Marshal(valueSourceMapping(source))
 }
 
-// UnmarshalJSON reads a literal string or a source object.
+// sourceCount counts the sources that are set, which a valid value source has exactly one of.
+func (source ValueSource) sourceCount() int {
+	count := 0
+	for _, isSet := range []bool{
+		source.Value != "", len(source.List) > 0, source.FromCredential != "", source.FromSetting != "", source.FromKey != "", source.Template != "",
+	} {
+		if isSet {
+			count++
+		}
+	}
+	return count
+}
+
+// UnmarshalJSON reads a literal string, a literal array or a source object with one source.
 func (source *ValueSource) UnmarshalJSON(contents []byte) error {
 	var literal string
 	if json.Unmarshal(contents, &literal) == nil {
 		*source = ValueSource{Value: literal}
 		return nil
 	}
+	var list []string
+	if json.Unmarshal(contents, &list) == nil {
+		*source = ValueSource{List: list}
+		return nil
+	}
 	type valueSourceMapping ValueSource
 	var mapping valueSourceMapping
-	if err := json.Unmarshal(contents, &mapping); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&mapping); err != nil {
 		return fmt.Errorf("value source: %w", err)
+	}
+	if ValueSource(mapping).sourceCount() != 1 {
+		return errors.New("value source: an object must name exactly one source")
 	}
 	*source = ValueSource(mapping)
 	return nil
@@ -294,12 +344,7 @@ type tokenGrantContext struct {
 
 // validateTokenGrants checks the refresh and minting declarations of one method.
 func validateTokenGrants(prefix string, method AuthMethod, specConfigurationFields []Field) []string {
-	grantContext := tokenGrantContext{prefix: prefix, credentials: fieldsByName(method.Fields), settings: fieldsByName(specConfigurationFields)}
-	if method.Configuration != nil {
-		for _, field := range method.Configuration.Fields {
-			grantContext.settings[field.Name] = field
-		}
-	}
+	grantContext := tokenGrantContext{prefix: prefix, credentials: fieldsByName(method.Fields), settings: authMethodSettings(specConfigurationFields, method.Configuration)}
 	var problems []string
 	if method.OAuth2 != nil {
 		problems = append(problems, grantContext.validateOAuthTokenRequests(method.OAuth2)...)
@@ -486,6 +531,9 @@ func (grantContext tokenGrantContext) validateCredentialMappings(label string, m
 // validateEndpointSource also requires a literal or translated endpoint to be an absolute HTTPS URL.
 func (grantContext tokenGrantContext) validateEndpointSource(label string, source ValueSource, hasKey bool) []string {
 	problems := grantContext.validateValueSource(label, source, hasKey)
+	if source.FromSetting != "" && len(source.Values) == 0 {
+		problems = append(problems, validateSettingReference(label, source.FromSetting, "url", grantContext.settings)...)
+	}
 	if source.Value != "" && !isHTTPSURL(source.Value) {
 		problems = append(problems, label+" must be an absolute HTTPS URL")
 	}
@@ -508,13 +556,7 @@ func hasFixedHTTPSOrigin(template string) bool {
 }
 
 func (grantContext tokenGrantContext) validateValueSource(label string, source ValueSource, hasKey bool) []string {
-	sourceCount := 0
-	for _, value := range []string{source.Value, source.FromCredential, source.FromSetting, source.FromKey, source.Template} {
-		if value != "" {
-			sourceCount++
-		}
-	}
-	if sourceCount != 1 {
+	if source.sourceCount() != 1 || len(source.List) > 0 {
 		return []string{label + " requires exactly one of a literal, fromCredential, fromSetting, fromKey, or template"}
 	}
 	var problems []string

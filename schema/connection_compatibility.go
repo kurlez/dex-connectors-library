@@ -154,16 +154,16 @@ func findFieldTypeBreaks(label string, released, candidate Field) []string {
 
 // findOAuthScopeBreaks compares fixed scopes as sets and setting-sourced scopes by the setting they name, because
 // a connection authorized for its own setting's scopes keeps them while the setting stays the same.
-func findOAuthScopeBreaks(label string, released, candidate OAuthScopes) []string {
+func findOAuthScopeBreaks(label string, released, candidate ValueSource) []string {
 	switch {
-	case released.IsFromSetting() && candidate.IsFromSetting() && released.FromSetting != candidate.FromSetting:
+	case released.FromSetting != "" && candidate.FromSetting != "" && released.FromSetting != candidate.FromSetting:
 		return []string{fmt.Sprintf("%s change from setting %s to setting %s", label, released.FromSetting, candidate.FromSetting)}
-	case released.IsFromSetting() && !candidate.IsFromSetting():
+	case released.FromSetting != "" && candidate.FromSetting == "":
 		return []string{fmt.Sprintf("%s change from setting %s to a fixed list", label, released.FromSetting)}
-	case !released.IsFromSetting() && candidate.IsFromSetting():
+	case released.FromSetting == "" && candidate.FromSetting != "":
 		return []string{fmt.Sprintf("%s change from a fixed list to setting %s", label, candidate.FromSetting)}
 	}
-	return findScopeBreaks(label, released.Values, candidate.Values)
+	return findScopeBreaks(label, released.List, candidate.List)
 }
 
 func findScopeBreaks(label string, released, candidate []string) []string {
@@ -211,9 +211,9 @@ func methodConfigurationFields(method AuthMethod) []Field {
 	return method.Configuration.Fields
 }
 
-func oauthScopes(oauth *OAuth2) OAuthScopes {
+func oauthScopes(oauth *OAuth2) ValueSource {
 	if oauth == nil {
-		return OAuthScopes{}
+		return ValueSource{}
 	}
 	return oauth.Scopes
 }

@@ -121,6 +121,12 @@ func TestTokenGrantDeclarationsRejectInvalidReferences(t *testing.T) {
 		"a plain HTTP token endpoint": {edits: []manifestEdit{
 			{"sandbox: https://test.example.com/token", "sandbox: http://test.example.com/token"},
 		}, problem: "tokenEndpoint values must be absolute HTTPS URLs"},
+		"a client credentials endpoint from a setting that is not a required url": {edits: []manifestEdit{
+			{`tokenEndpoint: {template: "https://login.example.com/{tenant_id}/token"}`, "tokenEndpoint: {fromSetting: tenantId}"},
+		}, problem: "clientCredentials tokenEndpoint fromSetting tenantId must name a url configuration field"},
+		"a literal list where one value belongs": {edits: []manifestEdit{
+			{"issuer: {fromKey: client_email}", "issuer: [a, b]"},
+		}, problem: "issuer requires exactly one of a literal, fromCredential, fromSetting, fromKey, or template"},
 		"a client credentials endpoint from a key member": {edits: []manifestEdit{
 			{`tokenEndpoint: {template: "https://login.example.com/{tenant_id}/token"}`, "tokenEndpoint: {fromKey: token_uri}"},
 		}, problem: "clientCredentials tokenEndpoint fromKey requires keyCredential"},

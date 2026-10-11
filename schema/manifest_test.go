@@ -135,7 +135,7 @@ spec:
 	require.NoError(t, err)
 	require.Equal(t, []string{"channels:history"}, manifest.Spec.Auth.OAuth2.UserScopes)
 	require.Equal(t, "authed_user.access_token", manifest.Spec.Auth.OAuth2.CredentialMappings[1].Source)
-	require.Equal(t, schema.OAuthEndpoint{URL: "https://slack.com/api/auth.test"}, manifest.Spec.Auth.OAuth2.CredentialDerivations[0].Endpoint)
+	require.Equal(t, schema.ValueSource{Value: "https://slack.com/api/auth.test"}, manifest.Spec.Auth.OAuth2.CredentialDerivations[0].Endpoint)
 	require.Equal(t, "listChannels", manifest.Spec.Studio.Commands[0].ID)
 	require.Equal(t, "bot_token", manifest.Spec.Studio.Commands[0].Request.Credential.Field)
 }
@@ -149,7 +149,7 @@ func TestDecodeOAuthManifestFixture(t *testing.T) {
 	require.Equal(t, "google-sheets-oauth", manifest.Spec.Auth.ConnectionKind)
 	require.Equal(t, "oauth2", manifest.Spec.Auth.OAuth2.Protocol)
 	require.True(t, manifest.Spec.Auth.OAuth2.PKCE)
-	require.Equal(t, []string{"https://www.googleapis.com/auth/drive.file"}, manifest.Spec.Auth.OAuth2.Scopes.Values)
+	require.Equal(t, []string{"https://www.googleapis.com/auth/drive.file"}, manifest.Spec.Auth.OAuth2.Scopes.List)
 	require.Equal(t, "secretString", manifest.Spec.Auth.Fields[0].Type)
 	require.Equal(t, "required", manifest.Spec.Operations[0].Authorization)
 	require.Len(t, manifest.Spec.Auth.Fields, 1)
@@ -163,7 +163,7 @@ func TestDecodeOIDCManifestFixture(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "linkedin-oidc", manifest.Spec.Auth.ConnectionKind)
 	require.Equal(t, "oidc", manifest.Spec.Auth.OAuth2.Protocol)
-	require.Equal(t, schema.OAuthEndpoint{URL: "https://www.linkedin.com"}, manifest.Spec.Auth.OAuth2.OIDC.Issuer)
+	require.Equal(t, schema.ValueSource{Value: "https://www.linkedin.com"}, manifest.Spec.Auth.OAuth2.OIDC.Issuer)
 	require.True(t, manifest.Spec.Auth.OAuth2.OIDC.NonceRequired)
 	require.Equal(t, "required", manifest.Spec.Operations[0].Authorization)
 }
@@ -742,15 +742,13 @@ func TestDecodeOAuthEndpointsAndScopesFromSettings(t *testing.T) {
 	require.NoError(t, err)
 
 	oauth := manifest.Spec.Auth.OAuth2
-	require.Equal(t, schema.OAuthEndpoint{FromSetting: "authorizationEndpoint"}, oauth.AuthorizationEndpoint)
-	require.Equal(t, schema.OAuthEndpoint{FromSetting: "tokenEndpoint"}, oauth.TokenEndpoint)
-	require.Equal(t, schema.OAuthScopes{FromSetting: "scopes"}, oauth.Scopes)
-	require.True(t, oauth.TokenEndpoint.IsFromSetting())
-	require.True(t, oauth.Scopes.IsFromSetting())
-	require.Equal(t, schema.OAuthEndpoint{FromSetting: "issuer"}, oauth.OIDC.Issuer)
-	require.Equal(t, schema.OAuthEndpoint{FromSetting: "discoveryEndpoint"}, oauth.OIDC.DiscoveryEndpoint)
-	require.Equal(t, schema.OAuthEndpoint{FromSetting: "userInfoEndpoint"}, oauth.OIDC.UserInfoEndpoint)
-	require.Equal(t, schema.OAuthEndpoint{FromSetting: "userInfoEndpoint"}, oauth.CredentialDerivations[0].Endpoint)
+	require.Equal(t, schema.ValueSource{FromSetting: "authorizationEndpoint"}, oauth.AuthorizationEndpoint)
+	require.Equal(t, schema.ValueSource{FromSetting: "tokenEndpoint"}, oauth.TokenEndpoint)
+	require.Equal(t, schema.ValueSource{FromSetting: "scopes"}, oauth.Scopes)
+	require.Equal(t, schema.ValueSource{FromSetting: "issuer"}, oauth.OIDC.Issuer)
+	require.Equal(t, schema.ValueSource{FromSetting: "discoveryEndpoint"}, oauth.OIDC.DiscoveryEndpoint)
+	require.Equal(t, schema.ValueSource{FromSetting: "userInfoEndpoint"}, oauth.OIDC.UserInfoEndpoint)
+	require.Equal(t, schema.ValueSource{FromSetting: "userInfoEndpoint"}, oauth.CredentialDerivations[0].Endpoint)
 }
 
 func TestFixedOAuthEndpointsAndScopesMarshalAsPlainValues(t *testing.T) {
@@ -789,13 +787,13 @@ func TestFixedAndSettingEndpointsDecodeFromJSON(t *testing.T) {
 
 	require.NoError(t, json.Unmarshal([]byte(`{"authorizationEndpoint":"https://a.example.com","tokenEndpoint":{"fromSetting":"tokenEndpoint"},"scopes":["a","b"]}`), &oauth))
 
-	require.Equal(t, schema.OAuthEndpoint{URL: "https://a.example.com"}, oauth.AuthorizationEndpoint)
-	require.Equal(t, schema.OAuthEndpoint{FromSetting: "tokenEndpoint"}, oauth.TokenEndpoint)
-	require.Equal(t, schema.OAuthScopes{Values: []string{"a", "b"}}, oauth.Scopes)
+	require.Equal(t, schema.ValueSource{Value: "https://a.example.com"}, oauth.AuthorizationEndpoint)
+	require.Equal(t, schema.ValueSource{FromSetting: "tokenEndpoint"}, oauth.TokenEndpoint)
+	require.Equal(t, schema.ValueSource{List: []string{"a", "b"}}, oauth.Scopes)
 	require.Error(t, json.Unmarshal([]byte(`{"tokenEndpoint":{"fromSetting":"x","default":"y"}}`), &oauth))
 	require.Error(t, json.Unmarshal([]byte(`{"tokenEndpoint":{"fromSetting":""}}`), &oauth))
 	require.Error(t, json.Unmarshal([]byte(`{"tokenEndpoint":7}`), &oauth))
-	require.Error(t, json.Unmarshal([]byte(`{"scopes":"openid"}`), &oauth))
+	require.Error(t, json.Unmarshal([]byte(`{"scopes":{"fromSetting":"a","fromKey":"b"}}`), &oauth))
 }
 
 func TestRejectInvalidSettingReferences(t *testing.T) {
@@ -847,27 +845,27 @@ func TestRejectInvalidSettingReferences(t *testing.T) {
 		{
 			name:         "setting reference with another key",
 			replacements: [][2]string{{"tokenEndpoint: {fromSetting: tokenEndpoint}", "tokenEndpoint: {fromSetting: tokenEndpoint, default: x}"}},
-			message:      "a setting reference must be exactly {fromSetting: <configuration field name>}",
+			message:      "value source: field default is not supported",
 		},
 		{
 			name:         "setting reference with another key name",
 			replacements: [][2]string{{"tokenEndpoint: {fromSetting: tokenEndpoint}", "tokenEndpoint: {fromConfig: tokenEndpoint}"}},
-			message:      "a setting reference must be exactly {fromSetting: <configuration field name>}",
+			message:      "value source: field fromConfig is not supported",
 		},
 		{
 			name:         "setting reference with a list value",
 			replacements: [][2]string{{"tokenEndpoint: {fromSetting: tokenEndpoint}", "tokenEndpoint: {fromSetting: [tokenEndpoint]}"}},
-			message:      "a setting reference must be exactly {fromSetting: <configuration field name>}",
+			message:      "cannot unmarshal !!seq into string",
 		},
 		{
 			name:         "endpoint is a list",
 			replacements: [][2]string{{"tokenEndpoint: {fromSetting: tokenEndpoint}", "tokenEndpoint: [https://a.example.com]"}},
-			message:      "an OAuth endpoint must be a URL string or a {fromSetting} mapping",
+			message:      "oauth2 auth requires connectionKind, endpoints, and scopes",
 		},
 		{
 			name:         "scopes are a string",
 			replacements: [][2]string{{"scopes: {fromSetting: scopes}", "scopes: openid"}},
-			message:      "OAuth scopes must be a list of strings or a {fromSetting} mapping",
+			message:      "oauth2 auth requires connectionKind, endpoints, and scopes",
 		},
 		{
 			name:         "a fixed endpoint still must be HTTPS",
@@ -963,8 +961,8 @@ spec:
 
 	manifest, err := schema.Decode(strings.NewReader(manifestFor("firstEndpoint")))
 	require.NoError(t, err)
-	require.Equal(t, schema.OAuthEndpoint{FromSetting: "firstEndpoint"}, manifest.Spec.Auth.Methods[0].OAuth2.TokenEndpoint)
-	require.Equal(t, schema.OAuthEndpoint{URL: "https://identity.example.com/authorize"}, manifest.Spec.Auth.Methods[1].OAuth2.AuthorizationEndpoint)
+	require.Equal(t, schema.ValueSource{FromSetting: "firstEndpoint"}, manifest.Spec.Auth.Methods[0].OAuth2.TokenEndpoint)
+	require.Equal(t, schema.ValueSource{Value: "https://identity.example.com/authorize"}, manifest.Spec.Auth.Methods[1].OAuth2.AuthorizationEndpoint)
 
 	_, err = schema.Decode(strings.NewReader(manifestFor("secondEndpoint")))
 	require.ErrorContains(t, err, "spec.auth method first oauth2 tokenEndpoint fromSetting secondEndpoint must name a configuration field of this auth method")

@@ -458,13 +458,15 @@ serviceAccount:
 ### Value sources
 
 `tokenEndpointAuthMethod`, `tokenEndpoint` of `clientCredentials`, and every
-`jwtBearer` value except the lists name where a host finds the value. Each is
-one of:
+`jwtBearer` value except the lists name where a host finds the value. They
+share one value source type with the OAuth endpoints and `scopes` of
+[Endpoints and scopes from connection settings](#endpoints-and-scopes-from-connection-settings),
+which accept only a literal and `{fromSetting}`. Each is one of:
 
 - a literal string;
 - `{fromCredential: <field>}`, a credential field of the method;
 - `{fromSetting: <field>}`, a `spec.configuration` field or one of the
-  method's `configuration.fields`;
+  method's `configuration.fields`; for an endpoint, a required `url` field;
 - `{fromKey: <member>}`, a top-level string member of the JSON key in
   `keyCredential`;
 - `{template: "https://host/path/{name}"}`, whose placeholders each name a
