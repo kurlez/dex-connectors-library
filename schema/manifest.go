@@ -159,12 +159,12 @@ type AuthorizationGuide struct {
 }
 
 type OAuth2 struct {
-	AuthorizationEndpoint   string                      `yaml:"authorizationEndpoint" json:"authorizationEndpoint"`
-	TokenEndpoint           string                      `yaml:"tokenEndpoint" json:"tokenEndpoint"`
+	AuthorizationEndpoint   OAuthEndpoint               `yaml:"authorizationEndpoint" json:"authorizationEndpoint"`
+	TokenEndpoint           OAuthEndpoint               `yaml:"tokenEndpoint" json:"tokenEndpoint"`
 	AuthorizationParameters map[string]string           `yaml:"authorizationParameters,omitempty" json:"authorizationParameters,omitempty"`
 	ClientIDCredential      string                      `yaml:"clientIDCredential,omitempty" json:"clientIDCredential,omitempty"`
 	ClientSecretCredential  string                      `yaml:"clientSecretCredential,omitempty" json:"clientSecretCredential,omitempty"`
-	Scopes                  []string                    `yaml:"scopes" json:"scopes"`
+	Scopes                  OAuthScopes                 `yaml:"scopes" json:"scopes"`
 	UserScopes              []string                    `yaml:"userScopes,omitempty" json:"userScopes,omitempty"`
 	CredentialMappings      []OAuthCredentialMapping    `yaml:"credentialMappings,omitempty" json:"credentialMappings,omitempty"`
 	CredentialDerivations   []OAuthCredentialDerivation `yaml:"credentialDerivations,omitempty" json:"credentialDerivations,omitempty"`
@@ -179,17 +179,17 @@ type OAuthCredentialMapping struct {
 }
 
 type OAuthCredentialDerivation struct {
-	Credential string `yaml:"credential" json:"credential"`
-	Endpoint   string `yaml:"endpoint" json:"endpoint"`
-	Source     string `yaml:"source" json:"source"`
-	VerifiedBy string `yaml:"verifiedBy,omitempty" json:"verifiedBy,omitempty"`
+	Credential string        `yaml:"credential" json:"credential"`
+	Endpoint   OAuthEndpoint `yaml:"endpoint" json:"endpoint"`
+	Source     string        `yaml:"source" json:"source"`
+	VerifiedBy string        `yaml:"verifiedBy,omitempty" json:"verifiedBy,omitempty"`
 }
 
 type OIDC struct {
-	Issuer            string `yaml:"issuer" json:"issuer"`
-	DiscoveryEndpoint string `yaml:"discoveryEndpoint" json:"discoveryEndpoint"`
-	UserInfoEndpoint  string `yaml:"userInfoEndpoint" json:"userInfoEndpoint"`
-	NonceRequired     bool   `yaml:"nonceRequired" json:"nonceRequired"`
+	Issuer            OAuthEndpoint `yaml:"issuer" json:"issuer"`
+	DiscoveryEndpoint OAuthEndpoint `yaml:"discoveryEndpoint" json:"discoveryEndpoint"`
+	UserInfoEndpoint  OAuthEndpoint `yaml:"userInfoEndpoint" json:"userInfoEndpoint"`
+	NonceRequired     bool          `yaml:"nonceRequired" json:"nonceRequired"`
 }
 
 type Field struct {
@@ -395,7 +395,7 @@ func (manifest Manifest) Validate() error {
 		problems = append(problems, validateAuthMethod("spec.auth", AuthMethod{
 			Type: manifest.Spec.Auth.Type, ConnectionKind: manifest.Spec.Auth.ConnectionKind,
 			Fields: manifest.Spec.Auth.Fields, Guide: manifest.Spec.Auth.Guide, OAuth2: manifest.Spec.Auth.OAuth2,
-		})...)
+		}, manifest.Spec.Configuration.Fields)...)
 		if manifest.Spec.Auth.MethodLabel != "" {
 			problems = append(problems, "spec.auth.methodLabel requires spec.auth methods")
 		}
@@ -418,7 +418,7 @@ func (manifest Manifest) Validate() error {
 			if method.Recommended {
 				recommendedMethods++
 			}
-			problems = append(problems, validateAuthMethod("spec.auth method "+method.ID, method)...)
+			problems = append(problems, validateAuthMethod("spec.auth method "+method.ID, method, manifest.Spec.Configuration.Fields)...)
 			for _, field := range method.Fields {
 				if reservedAuthMethodNames[field.Name] || reservedAuthMethodNames[field.GoName] {
 					problems = append(problems, "auth_method and AuthMethodID are reserved for the selected auth method")
@@ -845,7 +845,7 @@ func isValidJSONPath(value string) bool {
 	return true
 }
 
-func validateAuthMethod(prefix string, method AuthMethod) []string {
+func validateAuthMethod(prefix string, method AuthMethod, specConfigurationFields []Field) []string {
 	var problems []string
 	if method.Type != "none" && method.Type != "apiKey" && method.Type != "oauth2" && method.Type != "serviceAccount" {
 		problems = append(problems, prefix+" type must be none, apiKey, oauth2, or serviceAccount")
@@ -888,9 +888,13 @@ func validateAuthMethod(prefix string, method AuthMethod) []string {
 		return append(problems, prefix+" oauth2 auth requires oauth2 metadata")
 	}
 	oauth := method.OAuth2
-	if method.ConnectionKind == "" || !isHTTPSURL(oauth.AuthorizationEndpoint) || !isHTTPSURL(oauth.TokenEndpoint) || len(oauth.Scopes) == 0 {
+	if method.ConnectionKind == "" || !oauth.AuthorizationEndpoint.hasValidSource() || !oauth.TokenEndpoint.hasValidSource() || !oauth.Scopes.hasValidSource() {
 		return append(problems, prefix+" oauth2 auth requires connectionKind, endpoints, and scopes")
 	}
+	settings := authMethodSettings(specConfigurationFields, method.Configuration)
+	problems = append(problems, validateOAuthEndpointSetting(prefix+" oauth2 authorizationEndpoint", oauth.AuthorizationEndpoint, settings)...)
+	problems = append(problems, validateOAuthEndpointSetting(prefix+" oauth2 tokenEndpoint", oauth.TokenEndpoint, settings)...)
+	problems = append(problems, validateOAuthScopesSetting(prefix+" oauth2 scopes", oauth.Scopes, settings)...)
 	if oauth.Protocol != "oauth2" && oauth.Protocol != "oidc" {
 		problems = append(problems, prefix+" oauth2 protocol must be oauth2 or oidc")
 	}
@@ -905,13 +909,17 @@ func validateAuthMethod(prefix string, method AuthMethod) []string {
 	}
 	if oauth.Protocol == "oidc" {
 		oidc := oauth.OIDC
-		if oidc == nil || !isHTTPSURL(oidc.Issuer) || !isHTTPSURL(oidc.DiscoveryEndpoint) || !isHTTPSURL(oidc.UserInfoEndpoint) || !oidc.NonceRequired {
+		if oidc == nil || !oidc.Issuer.hasValidSource() || !oidc.DiscoveryEndpoint.hasValidSource() || !oidc.UserInfoEndpoint.hasValidSource() || !oidc.NonceRequired {
 			problems = append(problems, prefix+" oidc auth requires HTTPS issuer, discovery, UserInfo, and nonce")
+		} else {
+			problems = append(problems, validateOAuthEndpointSetting(prefix+" oidc issuer", oidc.Issuer, settings)...)
+			problems = append(problems, validateOAuthEndpointSetting(prefix+" oidc discoveryEndpoint", oidc.DiscoveryEndpoint, settings)...)
+			problems = append(problems, validateOAuthEndpointSetting(prefix+" oidc userInfoEndpoint", oidc.UserInfoEndpoint, settings)...)
 		}
 	} else if oauth.OIDC != nil {
 		problems = append(problems, prefix+" oidc metadata requires oidc protocol")
 	}
-	for scopeKind, scopes := range map[string][]string{"scopes": oauth.Scopes, "userScopes": oauth.UserScopes} {
+	for scopeKind, scopes := range map[string][]string{"scopes": oauth.Scopes.Values, "userScopes": oauth.UserScopes} {
 		seenScopes := map[string]bool{}
 		for _, scope := range scopes {
 			if strings.TrimSpace(scope) == "" || seenScopes[scope] {
@@ -938,9 +946,10 @@ func validateAuthMethod(prefix string, method AuthMethod) []string {
 		seenMappings[mapping.Credential] = true
 	}
 	for _, derivation := range oauth.CredentialDerivations {
-		if !credentialFields[derivation.Credential] || seenMappings[derivation.Credential] || !isHTTPSURL(derivation.Endpoint) || !isValidJSONPath(derivation.Source) || (derivation.VerifiedBy != "" && !isValidJSONPath(derivation.VerifiedBy)) {
+		if !credentialFields[derivation.Credential] || seenMappings[derivation.Credential] || !derivation.Endpoint.hasValidSource() || !isValidJSONPath(derivation.Source) || (derivation.VerifiedBy != "" && !isValidJSONPath(derivation.VerifiedBy)) {
 			problems = append(problems, prefix+" oauth2 credential derivations require unique credential fields, HTTPS endpoints, and dotted JSON response paths")
 		}
+		problems = append(problems, validateOAuthEndpointSetting(prefix+" oauth2 credential derivation endpoint", derivation.Endpoint, settings)...)
 		seenMappings[derivation.Credential] = true
 	}
 	return problems

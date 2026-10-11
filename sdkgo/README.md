@@ -321,18 +321,23 @@ hold the tokens, and checks its own required scopes. `oauthtoken` provides:
 - `HasAllScopes` and `HasExactScopes` for space- or comma-separated returned
   scopes.
 
-Each exchange accepts only an absolute HTTPS endpoint, never follows a
-redirect, reads at most 1 MiB, and requires an access token, a positive
-lifetime, and an accepted `token_type` compared without case. Missing refresh
-material and the connector's declared `TerminalErrorCodes` return an error
-wrapped by `NewReauthorizationRequiredError` on any status below 500, because
-providers report grant errors with 200, 400, or 403. A 5xx response is always
-retryable, even with a terminal code, because some providers report
-`invalid_grant` during outages. Errors repeat only a declared terminal code,
+Each exchange accepts only an absolute HTTPS endpoint unless the connector sets
+`AllowsPlainHTTP`, never follows a redirect, reads at most 1 MiB, and requires
+an access token, a positive lifetime, and an accepted `token_type` compared
+without case. Missing refresh material and the connector's declared
+`TerminalErrorCodes` return an error wrapped by
+`NewReauthorizationRequiredError` on any status below 500, because providers
+report grant errors with 200, 400, or 403. A 5xx response is always retryable,
+even with a terminal code, because some providers report `invalid_grant` during
+outages. Errors repeat only a declared terminal code,
 never provider descriptions, secrets, or undeclared codes.
 
 A `TokenEndpoint` also declares the provider differences its connector needs:
 
+- `AllowsPlainHTTP` for a token endpoint that a connection setting supplies and
+  whose owner may run it over plain HTTP, such as an identity provider on a
+  private network. The refresh token and client secret then travel unencrypted,
+  so a connector with a fixed provider URL never sets it;
 - `AcceptsMissingTokenType` and `AcceptedTokenTypes` for providers that omit
   `token_type` or return a value other than Bearer;
 - `AcceptsMissingExpiresIn` for providers such as Salesforce whose response has
@@ -402,7 +407,15 @@ provider:
 - `providerhttp` holds provider-neutral HTTP safety helpers: a client copy that
   never follows redirects, base-URL and header-safe credential checks, bounded
   body reads, `Retry-After` parsing capped at one hour, error-token extraction
-  that never returns message text, and a bounded server-sent event reader.
+  that never returns message text, a bounded server-sent event reader, and
+  `NewAddressPolicyClient`, a client copy that connects only as an
+  `AddressPolicy` allows. It resolves a host once, checks every resolved
+  address, and dials only an address it checked. `PrivateNetworkHTTP` suits a
+  connector whose URLs the connection owner enters: https to any address, plain
+  http only when every address is loopback or private. `PublicHTTPS` suits a
+  hosting platform's own provider calls: https to public addresses only.
+  Link-local addresses such as the cloud metadata address, unspecified and
+  multicast addresses are refused under both, and proxy settings are ignored.
 - `textgen` holds the contract types (`TextGenerationRequest`,
   `TextGenerationResponse`, `Usage`, finish reasons, reasoning effort), the six
   branch IDs, the model-ID rules and precedence, the `ErrorRule` table, the

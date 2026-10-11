@@ -1,0 +1,61 @@
+apiVersion: connectors.dex.dev/v1alpha1
+kind: Connector
+metadata:
+  name: oauth-settings-fixture
+  displayName: OAuth Settings Fixture
+  description: OIDC manifest fixture whose endpoints and scopes come from connection settings.
+  company: Example
+  version: v0.1.0
+spec:
+  provider: example
+  codegen:
+    go:
+      package: oauthsettingsfixture
+  configuration:
+    fields:
+      - {name: authorizationEndpoint, goName: AuthorizationEndpoint, type: url, description: Authorization endpoint of the identity provider., required: true}
+      - {name: tokenEndpoint, goName: TokenEndpoint, type: url, description: Token endpoint of the identity provider., required: true}
+      - {name: issuer, goName: Issuer, type: url, description: Issuer of the identity provider., required: true}
+      - {name: discoveryEndpoint, goName: DiscoveryEndpoint, type: url, description: Discovery document of the identity provider., required: true}
+      - {name: userInfoEndpoint, goName: UserInfoEndpoint, type: url, description: UserInfo endpoint of the identity provider., required: true}
+      - {name: scopes, goName: Scopes, type: stringList, description: Scopes to request., required: true}
+  auth:
+    type: oauth2
+    connectionKind: oauth-settings-fixture
+    fields:
+      - {name: oauth_client_id, goName: OAuthClientID, type: string, description: OAuth client ID., required: true}
+      - {name: oauth_client_secret, goName: OAuthClientSecret, type: secretString, description: OAuth client secret., required: true}
+      - {name: access_token, goName: AccessToken, type: secretString, description: OAuth access token., required: true}
+      - {name: subject, goName: Subject, type: string, description: Verified subject claim of the signed-in user., required: true}
+    guide:
+      startURL: https://identity.example.com/admin
+      steps: [Create a confidential client and copy its credentials.]
+    oauth2:
+      protocol: oidc
+      authorizationEndpoint: {fromSetting: authorizationEndpoint}
+      tokenEndpoint: {fromSetting: tokenEndpoint}
+      scopes: {fromSetting: scopes}
+      clientIDCredential: oauth_client_id
+      clientSecretCredential: oauth_client_secret
+      credentialMappings:
+        - {credential: access_token, source: access_token}
+      credentialDerivations:
+        - {credential: subject, endpoint: {fromSetting: userInfoEndpoint}, source: sub}
+      pkce: true
+      oidc:
+        issuer: {fromSetting: issuer}
+        discoveryEndpoint: {fromSetting: discoveryEndpoint}
+        userInfoEndpoint: {fromSetting: userInfoEndpoint}
+        nonceRequired: true
+  operations:
+    - name: getThing
+      goName: GetThing
+      inputType: GetThingInput
+      outputType: GetThingOutput
+      kind: query
+      description: Read one thing.
+      idempotency: none
+      branches:
+        - {id: found, goName: Found, description: The thing was read.}
+        - {id: defect, goName: Defect, description: Local input is invalid., optional: true}
+      execution: {executeMethodTimeout: 30s, durability: sync, retry: {initialInterval: 1s, backoffCoefficient: 2, maximumInterval: 30s, maximumAttempts: 5, totalDuration: 2m}}
