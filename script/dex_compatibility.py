@@ -15,6 +15,7 @@ import http.client
 import json
 import os
 import platform
+import random
 import re
 import shutil
 import subprocess
@@ -48,6 +49,8 @@ CONNECTOR_SDK_MODULE = f"github.com/{REPOSITORY}/sdkgo"
 GO_VET_BUILD_TAG_SETS = ("", "integration", "live")
 GITHUB_REQUEST_ATTEMPTS = 5
 TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+# A rate limit whose reset is further away than this fails the request instead of waiting for it.
+GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS = 60
 GO_MODULE_COPY_IGNORED_NAMES = ("node_modules", "dist", ".git")
 
 
@@ -193,20 +196,47 @@ def download(url: str, output: Path) -> None:
 def with_transient_retries(operation):
     """Runs one GitHub request, retrying rate limits, server errors and dropped connections.
 
-    A release must not fail because GitHub briefly answered 503. Other HTTP
-    errors, such as a missing asset, fail on the first attempt.
+    A release must not fail because GitHub briefly answered 503 or rate-limited
+    the many jobs of one run. Other HTTP errors, such as a missing asset or a
+    403 that is not a rate limit, fail on the first attempt.
     """
     for attempt in range(1, GITHUB_REQUEST_ATTEMPTS + 1):
+        delay = 2 ** attempt
         try:
             return operation()
         except urllib.error.HTTPError as error:
-            if error.code not in TRANSIENT_HTTP_STATUSES or attempt == GITHUB_REQUEST_ATTEMPTS:
+            wait = rate_limit_wait(error)
+            if attempt == GITHUB_REQUEST_ATTEMPTS or (wait is None and error.code not in TRANSIENT_HTTP_STATUSES):
                 raise
+            if wait is not None:
+                if wait > GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS:
+                    raise
+                # Jitter spreads the retries of the jobs that the same limit stopped.
+                delay = wait + random.uniform(0, delay)
         except (urllib.error.URLError, http.client.IncompleteRead, ConnectionError, TimeoutError):
             if attempt == GITHUB_REQUEST_ATTEMPTS:
                 raise
-        time.sleep(2 ** attempt)
+        time.sleep(delay)
     raise AssertionError("retry loop always returns or raises")
+
+
+def rate_limit_wait(error: urllib.error.HTTPError) -> float | None:
+    """Returns the seconds GitHub asks to wait before retrying, or None when error is not a rate limit.
+
+    GitHub answers a primary or secondary rate limit with 403 or 429 and either
+    retry-after or x-ratelimit-remaining: 0 with x-ratelimit-reset (epoch
+    seconds); without a reset it asks for at least a minute.
+    """
+    headers = error.headers
+    if error.code not in (403, 429) or headers is None:
+        return None
+    retry_after = (headers.get("retry-after") or "").strip()
+    if retry_after.isdigit():
+        return float(retry_after)
+    if (headers.get("x-ratelimit-remaining") or "").strip() == "0":
+        reset = (headers.get("x-ratelimit-reset") or "").strip()
+        return max(0.0, float(reset) - time.time()) if reset.isdigit() else 60.0
+    return None
 
 
 def github_releases(repository: str) -> list[dict[str, object]]:
