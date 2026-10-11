@@ -110,6 +110,8 @@ spec:
         - {credential: access_token, source: access_token}
         - {credential: refresh_token, source: refresh_token}
       pkce: true
+      refresh:
+        terminalErrorCodes: [bad_refresh_token, incorrect_client_credentials, invalid_client, invalid_grant]
   operations:
     - name: getAuthenticatedProfile
       goName: GetAuthenticatedProfile
