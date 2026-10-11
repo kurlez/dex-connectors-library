@@ -297,8 +297,8 @@ refresh token into its result.
 
 An entry that the configuration document marks with `sharedConnectionId` skips
 this path. The project provider reads its credential from the
-document's credential broker, while its settings stay in the document, caches them, reads again when the credential is
-near expiry, and never calls the driver. When a rejection read returns the
+document's credential broker, and its settings stay in the document. It caches
+the credential, reads again when it is near expiry, and never calls the driver. When a rejection read returns the
 rejected credential unchanged, `ResolveCredentialAfterRejection` returns
 `projectconfig.ErrRejectedCredentialNotRefreshed`, never a reauthorization error.
 A connector should not repeat the provider call then. A connector that ignores

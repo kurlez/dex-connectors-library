@@ -118,8 +118,15 @@ broker answers HTTP 200 with a JSON object; unknown members are ignored:
 | `issuedAt` | `READY`. When the credential was issued, as RFC 3339; absent when unknown. |
 | `expiresAt` | `READY`. When it expires, as RFC 3339; absent or `null` for a credential that does not expire. |
 
+HTTP 401 means the broker refused the scope token. The SDK then drops its
+cached token, rereads `configuration/head` for the current
+`credentialBroker.tokenSecretRef`, reads that secret and, if the token differs,
+asks once more. A platform rotates scope tokens by writing a new token secret
+with `CreateCredentialBrokerToken` and updating that reference in the head, so
+applications need no restart. Without a different token the 401 is a rejection.
+
 HTTP 408, 425, 429 and every 5xx status, and any transport error, are
-`ErrCredentialBrokerUnavailable`. Any other status, a redirect, a body that is
+`ErrCredentialBrokerUnavailable`. Any other status, including a 401 that renewal does not change, a redirect, a body that is
 not a JSON object, an unknown `status` and a `READY` answer without a credential object
 or revision are `ErrCredentialBrokerRejected`. A request ends within 40
 seconds or when the calling Step is canceled, and a response is at most 1 MiB.

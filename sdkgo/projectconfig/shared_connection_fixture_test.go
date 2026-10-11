@@ -294,3 +294,15 @@ func (driver forbiddenDriver) Refresh(context.Context, projectconfig.RefreshStat
 	driver.t.Error("a shared entry must not call the refresh driver")
 	return projectconfig.RefreshResult[token]{}, nil
 }
+
+// rotateScopeToken writes a new scope token secret and points the configuration head at it.
+func (fixture *sharedFixture) rotateScopeToken(t *testing.T, newToken string) {
+	t.Helper()
+	current, _, err := fixture.configurations.ReadConfiguration(context.Background())
+	require.NoError(t, err)
+	reference, err := fixture.configurations.CreateCredentialBrokerToken(context.Background(), newToken)
+	require.NoError(t, err)
+	current.CredentialBroker = &projectconfig.CredentialBrokerConfiguration{Endpoint: current.CredentialBroker.Endpoint, TokenSecretRef: reference}
+	_, _, err = fixture.configurations.WriteConfiguration(context.Background(), current.Revision, current)
+	require.NoError(t, err)
+}
