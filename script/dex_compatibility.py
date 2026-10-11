@@ -210,7 +210,10 @@ def with_transient_retries(operation):
                 raise
             if wait is not None:
                 if wait > GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS:
-                    raise
+                    raise RuntimeError(
+                        f"GitHub rate limit (HTTP {error.code}): retry in {int(wait)} s, "
+                        f"beyond the {GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS} s this gate waits"
+                    ) from error
                 # Jitter spreads the retries of the jobs that the same limit stopped.
                 delay = wait + random.uniform(0, delay)
         except (urllib.error.URLError, http.client.IncompleteRead, ConnectionError, TimeoutError):
@@ -273,36 +276,75 @@ def stable_key(version: str) -> tuple[int, int, int]:
 
 
 def resolve_dex_release(requested_version: str) -> dict[str, object]:
-    """Returns the highest stable cli-vX.Y.Z release, or the exact stable release requested for reproduction."""
-    releases = github_releases(DEX_REPOSITORY)
-    candidates = [
-        release for release in releases
-        if not release.get("draft") and not release.get("prerelease")
-        and str(release.get("tag_name", "")).startswith("cli-v")
-        and STABLE_VERSION.fullmatch(str(release["tag_name"])[4:])
-    ]
+    """Returns the highest stable cli-vX.Y.Z release, or the exact stable release requested for reproduction.
+
+    The tags come from git ls-remote, which does not count against the GitHub
+    REST API limit that every job of a CI run shares; only the chosen tag's
+    release is read from the API. A release whose archive for this platform or
+    checksums.txt is not uploaded yet is skipped, so a release being published
+    does not fail the jobs that start meanwhile.
+    """
+    tags = stable_cli_tags(DEX_REPOSITORY)
     if requested_version != "latest":
         requested_tag = requested_version if requested_version.startswith("cli-") else f"cli-{requested_version}"
-        candidates = [release for release in candidates if release["tag_name"] == requested_tag]
-    if not candidates:
-        raise RuntimeError(f"no stable Dex CLI release found for {requested_version}")
-    release = max(candidates, key=lambda value: stable_key(str(value["tag_name"])[4:]))
-    reference = github_json(f"https://api.github.com/repos/{DEX_REPOSITORY}/git/ref/tags/{release['tag_name']}")
-    git_object = reference["object"]
-    if git_object["type"] == "tag":
-        git_object = github_json(git_object["url"])["object"]
-    release["resolved_commit"] = git_object["sha"]
-    print(f"Dex release: tag={release['tag_name']} commit={release['resolved_commit']}", flush=True)
+        tags = {tag: commit for tag, commit in tags.items() if tag == requested_tag}
+    for tag in sorted(tags, key=lambda name: stable_key(name[4:]), reverse=True):
+        release = published_release(DEX_REPOSITORY, tag)
+        if release is None:
+            continue
+        uploaded = {str(asset.get("name")) for asset in release.get("assets", [])}
+        missing = sorted({dexcli_archive_name(tag[4:]), "checksums.txt"} - uploaded)
+        if missing:
+            print(f"Dex release {tag} has no {', '.join(missing)} yet; trying the previous release", flush=True)
+            continue
+        release["resolved_commit"] = tags[tag]
+        print(f"Dex release: tag={tag} commit={tags[tag]}", flush=True)
+        return release
+    raise RuntimeError(f"no stable Dex CLI release found for {requested_version}")
+
+
+def stable_cli_tags(repository: str) -> dict[str, str]:
+    """Returns each stable cli-vX.Y.Z tag of repository with the commit it points to."""
+    output = run(["git", "ls-remote", "--tags", f"https://github.com/{repository}.git", "refs/tags/cli-v*"], Path.cwd()).stdout
+    targets: dict[str, str] = {}
+    peeled: dict[str, str] = {}
+    for line in output.splitlines():
+        sha, _, reference = line.partition("\t")
+        tag = reference.removeprefix("refs/tags/")
+        if tag.endswith("^{}"):
+            peeled[tag.removesuffix("^{}")] = sha
+        else:
+            targets[tag] = sha
+    return {
+        tag: peeled.get(tag, sha) for tag, sha in targets.items()
+        if tag.startswith("cli-") and STABLE_VERSION.fullmatch(tag[4:])
+    }
+
+
+def published_release(repository: str, tag: str) -> dict[str, object] | None:
+    """Returns tag's published, non-prerelease GitHub release, or None when tag has none."""
+    try:
+        release = github_json(f"https://api.github.com/repos/{repository}/releases/tags/{tag}")
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
+    if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
+        return None
     return release
 
 
-def download_dexcli(release: dict[str, object], directory: Path) -> Path:
-    version = str(release["tag_name"])[4:]
+def dexcli_archive_name(version: str) -> str:
+    """Returns the name of the Dex CLI archive of version for this platform."""
     operating_system = {"Darwin": "darwin", "Linux": "linux"}.get(platform.system())
     architecture = {"x86_64": "amd64", "AMD64": "amd64", "arm64": "arm64", "aarch64": "arm64"}.get(platform.machine())
     if not operating_system or not architecture:
         raise RuntimeError(f"unsupported platform: {platform.system()} {platform.machine()}")
-    archive_name = f"dexcli_{version}_{operating_system}_{architecture}.tar.gz"
+    return f"dexcli_{version}_{operating_system}_{architecture}.tar.gz"
+
+
+def download_dexcli(release: dict[str, object], directory: Path) -> Path:
+    archive_name = dexcli_archive_name(str(release["tag_name"])[4:])
     assets = {str(asset["name"]): asset for asset in release.get("assets", [])}
     if archive_name not in assets or "checksums.txt" not in assets:
         raise RuntimeError(f"Dex release is missing {archive_name} or checksums.txt")
