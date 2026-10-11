@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 // Package providerhttp holds provider-neutral HTTP safety helpers for connector
-// operations: a hardened client copy, base-URL and credential checks, bounded
-// body reads, Retry-After parsing, error-token extraction that never returns
-// provider message text, and a bounded server-sent event reader.
+// operations: a hardened client copy, a client that connects only as an
+// AddressPolicy allows, base-URL and credential checks, bounded body reads,
+// Retry-After parsing, error-token extraction that never returns provider
+// message text, and a bounded server-sent event reader.
 //
 // The package contains no provider host, model ID, error code, or credential.
 // A connector passes those in from its own manifest-backed configuration.

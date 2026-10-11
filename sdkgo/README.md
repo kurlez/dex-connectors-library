@@ -407,7 +407,15 @@ provider:
 - `providerhttp` holds provider-neutral HTTP safety helpers: a client copy that
   never follows redirects, base-URL and header-safe credential checks, bounded
   body reads, `Retry-After` parsing capped at one hour, error-token extraction
-  that never returns message text, and a bounded server-sent event reader.
+  that never returns message text, a bounded server-sent event reader, and
+  `NewAddressPolicyClient`, a client copy that connects only as an
+  `AddressPolicy` allows. It resolves a host once, checks every resolved
+  address, and dials only an address it checked. `PrivateNetworkHTTP` suits a
+  connector whose URLs the connection owner enters: https to any address, plain
+  http only when every address is loopback or private. `PublicHTTPS` suits a
+  hosting platform's own provider calls: https to public addresses only.
+  Link-local addresses such as the cloud metadata address, unspecified and
+  multicast addresses are refused under both, and proxy settings are ignored.
 - `textgen` holds the contract types (`TextGenerationRequest`,
   `TextGenerationResponse`, `Usage`, finish reasons, reasoning effort), the six
   branch IDs, the model-ID rules and precedence, the `ErrorRule` table, the
