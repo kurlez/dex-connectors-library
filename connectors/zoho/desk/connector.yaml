@@ -77,6 +77,8 @@ spec:
             - {credential: access_token, source: access_token}
             - {credential: refresh_token, source: refresh_token}
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-eu-oauth
         displayName: European Union (zoho.eu)
         description: For Zoho Desk accounts at https://desk.zoho.eu; Dex signs in through https://accounts.zoho.eu and refreshes the hourly access token automatically.
@@ -101,6 +103,8 @@ spec:
           scopes: *zohoDeskScopes
           credentialMappings: *zohoCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-in-oauth
         displayName: India (zoho.in)
         description: For Zoho Desk accounts at https://desk.zoho.in; Dex signs in through https://accounts.zoho.in and refreshes the hourly access token automatically.
@@ -125,6 +129,8 @@ spec:
           scopes: *zohoDeskScopes
           credentialMappings: *zohoCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-au-oauth
         displayName: Australia (zoho.com.au)
         description: For Zoho Desk accounts at https://desk.zoho.com.au; Dex signs in through https://accounts.zoho.com.au and refreshes the hourly access token automatically.
@@ -149,6 +155,8 @@ spec:
           scopes: *zohoDeskScopes
           credentialMappings: *zohoCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-jp-oauth
         displayName: Japan (zoho.jp)
         description: For Zoho Desk accounts at https://desk.zoho.jp; Dex signs in through https://accounts.zoho.jp and refreshes the hourly access token automatically.
@@ -173,6 +181,8 @@ spec:
           scopes: *zohoDeskScopes
           credentialMappings: *zohoCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-ca-oauth
         displayName: Canada (zohocloud.ca)
         description: For Zoho Desk accounts at https://desk.zohocloud.ca; Dex signs in through https://accounts.zohocloud.ca and refreshes the hourly access token automatically.
@@ -197,6 +207,8 @@ spec:
           scopes: *zohoDeskScopes
           credentialMappings: *zohoCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-sa-oauth
         displayName: Saudi Arabia (zoho.sa)
         description: For Zoho Desk accounts at https://desk.zoho.sa; Dex signs in through https://accounts.zoho.sa and refreshes the hourly access token automatically.
@@ -221,6 +233,8 @@ spec:
           scopes: *zohoDeskScopes
           credentialMappings: *zohoCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-sg-oauth
         displayName: Singapore (zoho.sg)
         description: For Zoho Desk accounts at https://desk.zoho.sg; Dex signs in through https://accounts.zoho.sg and refreshes the hourly access token automatically.
@@ -245,6 +259,8 @@ spec:
           scopes: *zohoDeskScopes
           credentialMappings: *zohoCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-ae-oauth
         displayName: United Arab Emirates (zoho.ae)
         description: For Zoho Desk accounts at https://desk.zoho.ae; Dex signs in through https://accounts.zoho.ae and refreshes the hourly access token automatically.
@@ -269,6 +285,8 @@ spec:
           scopes: *zohoDeskScopes
           credentialMappings: *zohoCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
   studio:
     setup:
       entrypoint: index.html

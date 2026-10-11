@@ -77,6 +77,8 @@ spec:
             - {credential: refresh_token, source: refresh_token}
             - {credential: api_domain, source: api_domain}
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-eu-oauth
         displayName: European Union (zoho.eu)
         description: For Zoho CRM accounts at https://crm.zoho.eu; Dex signs in through https://accounts.zoho.eu, calls the Zoho CRM API at https://www.zohoapis.eu or the sandbox or developer host Zoho names at sign-in, and refreshes the hourly access token automatically.
@@ -101,6 +103,8 @@ spec:
           scopes: *zohoCRMScopes
           credentialMappings: *zohoCRMCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-in-oauth
         displayName: India (zoho.in)
         description: For Zoho CRM accounts at https://crm.zoho.in; Dex signs in through https://accounts.zoho.in, calls the Zoho CRM API at https://www.zohoapis.in or the sandbox or developer host Zoho names at sign-in, and refreshes the hourly access token automatically.
@@ -125,6 +129,8 @@ spec:
           scopes: *zohoCRMScopes
           credentialMappings: *zohoCRMCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-au-oauth
         displayName: Australia (zoho.com.au)
         description: For Zoho CRM accounts at https://crm.zoho.com.au; Dex signs in through https://accounts.zoho.com.au, calls the Zoho CRM API at https://www.zohoapis.com.au or the sandbox or developer host Zoho names at sign-in, and refreshes the hourly access token automatically.
@@ -149,6 +155,8 @@ spec:
           scopes: *zohoCRMScopes
           credentialMappings: *zohoCRMCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-jp-oauth
         displayName: Japan (zoho.jp)
         description: For Zoho CRM accounts at https://crm.zoho.jp; Dex signs in through https://accounts.zoho.jp, calls the Zoho CRM API at https://www.zohoapis.jp or the sandbox or developer host Zoho names at sign-in, and refreshes the hourly access token automatically.
@@ -173,6 +181,8 @@ spec:
           scopes: *zohoCRMScopes
           credentialMappings: *zohoCRMCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-ca-oauth
         displayName: Canada (zohocloud.ca)
         description: For Zoho CRM accounts at https://crm.zohocloud.ca; Dex signs in through https://accounts.zohocloud.ca, calls the Zoho CRM API at https://www.zohoapis.ca or the sandbox or developer host Zoho names at sign-in, and refreshes the hourly access token automatically.
@@ -197,6 +207,8 @@ spec:
           scopes: *zohoCRMScopes
           credentialMappings: *zohoCRMCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
       - id: zoho-sa-oauth
         displayName: Saudi Arabia (zoho.sa)
         description: For Zoho CRM accounts at https://crm.zoho.sa; Dex signs in through https://accounts.zoho.sa, calls the Zoho CRM API at https://www.zohoapis.sa or the sandbox or developer host Zoho names at sign-in, and refreshes the hourly access token automatically.
@@ -221,6 +233,8 @@ spec:
           scopes: *zohoCRMScopes
           credentialMappings: *zohoCRMCredentialMappings
           pkce: false
+          refresh:
+            terminalErrorCodes: [invalid_code, invalid_client, invalid_client_secret]
   operations:
     - name: findRecords
       goName: FindRecords
