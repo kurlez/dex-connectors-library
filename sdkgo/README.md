@@ -48,11 +48,13 @@ Attributes.
 ## Shared project configuration
 
 Project Dex Web and application replicas can share versioned encrypted S3
-configuration without a credential broker. See
+configuration. An entry that names a shared connection reads its credential
+from a credential broker instead. See
 [projectconfig](projectconfig/README.md) for scope-bound configuration snapshots,
-conditional credential admission, restart recovery, the typed SDK adapter, and
-the runnable environment-loader example. Existing providers are unchanged;
-applications explicitly choose this provider.
+conditional credential admission, restart recovery, shared connections and the
+broker's wire contract, the typed SDK adapter, and the runnable
+environment-loader example. Existing providers are unchanged; applications
+explicitly choose this provider.
 
 ## Trigger delivery outcomes
 
@@ -293,6 +295,17 @@ Any other failed refresh keeps the existing credential authorized, returns
 When an OAuth provider omits a new refresh token, the driver must copy the prior
 refresh token into its result.
 
+An entry that the configuration document marks with `sharedConnectionId` skips
+this path. The project provider reads its credential from the
+document's credential broker, and its settings stay in the document. It caches
+the credential, reads again when it is near expiry, and never calls the driver.
+When a rejection read returns the rejected credential unchanged, `ResolveCredentialAfterRejection` returns
+`projectconfig.ErrRejectedCredentialNotRefreshed`, never a reauthorization error.
+A connector should not repeat the provider call then. A connector that ignores
+the error returns the provider's authentication error, as it does for a refreshed
+credential that is rejected again. See
+[projectconfig](projectconfig/README.md#shared-connections).
+
 Hosted credential providers implement the same interface behind their trusted
 credential broker. Applications and Flow state receive only the resolved
 short-lived value; long-lived renewal material remains in the host's encrypted
@@ -318,6 +331,12 @@ hold the tokens, and checks its own required scopes. `oauthtoken` provides:
   the provider omits a replacement, as the rule above requires;
 - `IsRefreshRequired` with `RefreshSkew` and a `MissingExpiryRule` for
   providers that do or do not issue non-expiring tokens;
+- `IsRefreshRequiredWithIssueTime` and `ProportionalRefreshSkew` for a host that
+  knows when a token was issued: the skew is `min(RefreshSkew, lifetime/4)`, so a
+  60-second token is not expired on issue, and `RefreshSkew` stays the skew of a
+  token whose lifetime is unknown;
+- `ForcedRefreshFloor`, `min(60 seconds, lifetime/4)`, for a host that refuses to
+  refresh a credential again right after issuing it;
 - `HasAllScopes` and `HasExactScopes` for space- or comma-separated returned
   scopes.
 
@@ -727,6 +746,13 @@ A source persists a matched event before provider acknowledgement and replays
 pending events after a restart, on any replica. The inbox removes an event when
 the target consumes it: the target returns nil, or it reports the event
 undeliverable.
+
+Before an inbox first reads its object, it creates an empty one with a
+create-only write (`If-None-Match: *`); a conflict means the object already
+exists. Without `s3:ListBucket`, S3 answers a read of a missing key with 403
+instead of 404, so the inbox never reads a missing key, and a 403 always means
+the grant does not cover the inbox. The application's grant needs `GetObject`
+and `PutObject` on its scope's `trigger-inboxes/` objects and no `ListBucket`.
 
 ## Release and tests
 

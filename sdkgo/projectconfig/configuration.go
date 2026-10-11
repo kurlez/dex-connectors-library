@@ -12,7 +12,11 @@ import (
 )
 
 // ConfigurationSchemaVersion identifies the secret-free project configuration document shared with Dex Web.
-const ConfigurationSchemaVersion = "connectors.dex.dev/project-configuration/v1alpha2"
+// It adds shared connections and the credential broker to the previous version. A document that uses
+// neither keeps the previous version when written, so applications built before this version still read it.
+const ConfigurationSchemaVersion = "connectors.dex.dev/project-configuration/v1alpha3"
+
+const previousConfigurationSchemaVersion = "connectors.dex.dev/project-configuration/v1alpha2"
 
 // ConnectionConfiguration pins ordinary settings and a logical credential identity, never secret values or credential versions.
 type ConnectionConfiguration struct {
@@ -26,8 +30,21 @@ type ConnectionConfiguration struct {
 	Provider string `json:"provider"`
 	// AuthMethodID is the selected authorization method, or empty when the connector declares one.
 	AuthMethodID string `json:"authMethodId,omitempty"`
+	// SharedConnectionID selects a shared connection. The credential broker then serves the entry's credential,
+	// and the entry never reads or writes the connection's stored credential. Configuration still holds its settings.
+	SharedConnectionID string `json:"sharedConnectionId,omitempty"`
 	// Configuration contains manifest-validated ordinary values; secret fields must be excluded by Dex Web.
+	// A shared entry holds the shared connection's settings as they were when the document was written.
 	Configuration json.RawMessage `json:"configuration"`
+}
+
+// CredentialBrokerConfiguration locates the service that serves the credentials of shared connections.
+type CredentialBrokerConfiguration struct {
+	// Endpoint is the absolute URL that receives each credential read. It is https, or http for a loopback, private,
+	// single-label or cluster-local host.
+	Endpoint string `json:"endpoint"`
+	// TokenSecretRef pins the scope token that authorizes the reads, created by CreateCredentialBrokerToken.
+	TokenSecretRef ApplicationSecretRef `json:"tokenSecretRef"`
 }
 
 // TriggerConfiguration pins one trigger binding's non-secret startup configuration.
@@ -76,6 +93,8 @@ type Configuration struct {
 	OperationConfigurations []OperationConfiguration `json:"operationConfigurations"`
 	// Environment contains ordinary values and exact private object references, never plaintext secrets.
 	Environment map[string]EnvironmentValue `json:"environment,omitempty"`
+	// CredentialBroker serves shared connections and is required when any connection sets SharedConnectionID.
+	CredentialBroker *CredentialBrokerConfiguration `json:"credentialBroker,omitempty"`
 }
 
 // SnapshotRef pins an exact immutable, secret-free document version for Preview or Live deployment.
@@ -140,7 +159,7 @@ func (store *ConfigurationStore) WriteConfiguration(ctx context.Context, expecte
 	if previous.Revision != expectedRevision {
 		return Configuration{}, Object{}, ErrConflict
 	}
-	configuration.SchemaVersion, configuration.Scope, configuration.Revision = ConfigurationSchemaVersion, store.scope, expectedRevision+1
+	configuration.SchemaVersion, configuration.Scope, configuration.Revision = schemaVersionFor(configuration), store.scope, expectedRevision+1
 	if err = validateConfiguration(configuration); err != nil {
 		return Configuration{}, Object{}, err
 	}
@@ -195,7 +214,7 @@ func (store *ConfigurationStore) ReadSnapshot(ctx context.Context, reference Sna
 
 func (store *ConfigurationStore) decodeConfiguration(object Object) (Configuration, error) {
 	var configuration Configuration
-	if object.Key != store.key || object.Version == "" || object.Version == "null" || object.ETag == "" || strictJSON(object.Contents, &configuration) != nil || configuration.SchemaVersion != ConfigurationSchemaVersion || configuration.Scope != store.scope || configuration.Revision == 0 {
+	if object.Key != store.key || object.Version == "" || object.Version == "null" || object.ETag == "" || strictJSON(object.Contents, &configuration) != nil || !isSupportedSchemaVersion(configuration.SchemaVersion) || configuration.Scope != store.scope || configuration.Revision == 0 {
 		return Configuration{}, errors.New("configuration document identity is invalid")
 	}
 	if err := validateConfiguration(configuration); err != nil {
@@ -236,6 +255,9 @@ func (configuration Configuration) DecodeOperationConfiguration(connectorID, con
 
 func validateConfiguration(configuration Configuration) error {
 	if err := validateEnvironmentReferences(configuration); err != nil {
+		return err
+	}
+	if err := validateSharedConnections(configuration); err != nil {
 		return err
 	}
 	if len(configuration.Connections) > 1000 || len(configuration.TriggerBindings) > 10000 || len(configuration.OperationConfigurations) > 10000 {

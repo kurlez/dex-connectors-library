@@ -11,6 +11,7 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"sync/atomic"
 )
 
 const (
@@ -59,6 +60,8 @@ type triggerInboxDocument struct {
 type TriggerInbox struct {
 	objects ObjectStore
 	key     string
+	// headExists records that the head object was created or found, so no later read asks for a missing key.
+	headExists atomic.Bool
 }
 
 // NewTriggerInbox binds one Trigger binding's inbox in scope without reading or writing objects.
@@ -161,6 +164,9 @@ func (inbox *TriggerInbox) update(ctx context.Context, change func([]PendingTrig
 }
 
 func (inbox *TriggerInbox) read(ctx context.Context) (triggerInboxDocument, string, error) {
+	if err := inbox.createHead(ctx); err != nil {
+		return triggerInboxDocument{}, "", err
+	}
 	object, err := inbox.objects.ReadObject(ctx, inbox.key, "")
 	if errors.Is(err, ErrObjectNotFound) {
 		return triggerInboxDocument{SchemaVersion: triggerInboxSchema}, "", nil
@@ -173,6 +179,30 @@ func (inbox *TriggerInbox) read(ctx context.Context) (triggerInboxDocument, stri
 		return triggerInboxDocument{}, "", errors.New("trigger inbox document is invalid")
 	}
 	return document, object.ETag, nil
+}
+
+// createHead creates the empty head with a create-only write before the inbox first reads it. S3 refuses a
+// read of a missing key like a permission error unless the reader may list the bucket, so the inbox never
+// relies on reading a missing head; a conflict means the head already exists. When the outcome is unknown,
+// which includes a refused write on S3, the read that follows observes the head or reports the refusal.
+func (inbox *TriggerInbox) createHead(ctx context.Context) error {
+	if inbox.headExists.Load() {
+		return nil
+	}
+	contents, err := json.Marshal(triggerInboxDocument{SchemaVersion: triggerInboxSchema, Events: []PendingTriggerEvent{}})
+	if err != nil {
+		return errors.New("trigger inbox encoding failed")
+	}
+	_, err = inbox.objects.CreateObject(ctx, inbox.key, contents)
+	switch {
+	case err == nil, errors.Is(err, ErrConflict):
+		inbox.headExists.Store(true)
+		return nil
+	case errors.Is(err, ErrOutcomeUnknown):
+		return nil
+	default:
+		return err
+	}
 }
 
 func equalPendingEvents(left, right []PendingTriggerEvent) bool {

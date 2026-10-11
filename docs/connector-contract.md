@@ -359,6 +359,18 @@ write credential codecs or call credential provider constructors. Credential
 wire values are converted to `SecretString` only at this boundary and cannot be
 serialized again.
 
+A configuration entry may instead name a shared connection with
+`sharedConnectionId`. Its settings are frozen in the document's entry like an
+ordinary entry's, and the same provider constructors resolve its credential
+from the document's credential broker: the provider caches it, reads again near expiry,
+and never calls the connector's refresh driver. A rejected credential that the
+broker returns unchanged makes `ResolveCredentialAfterRejection` return
+`projectconfig.ErrRejectedCredentialNotRefreshed`, never a reauthorization
+error. A connector that ignores it returns the provider's authentication error,
+as it does for a refreshed credential that is rejected again. Generated
+connector code does not change.
+See [Shared connections](../sdkgo/projectconfig/README.md#shared-connections).
+
 Generated operation and Trigger factory configs expose `ConnectionName` with
 the `connector:"connectionName"` tag. It is required and must equal the typed
 Connection's name; a missing or different name fails when the Flow is built.

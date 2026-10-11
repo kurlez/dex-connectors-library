@@ -88,14 +88,19 @@ type ConnectionStoreConfig struct {
 	Objects ObjectStore
 	// Scope is trusted deployment configuration, never a request-selected storage target.
 	Scope Scope
+	// sharedConnections is set by LoadFromEnvironment to route shared entries to the broker.
+	sharedConnections *sharedConnectionsConfig
 }
 
 // ConnectionStore shares mutation fencing between Dex Web and every application replica.
+// A store that LoadFromEnvironment built also resolves the loaded document's shared entries from the credential broker,
+// without reading or writing their stored connections.
 type ConnectionStore struct {
 	objects ObjectStore
 	scope   Scope
 	prefix  string
 	now     func() time.Time
+	shared  *sharedConnections
 }
 
 type objectReference struct {
@@ -138,7 +143,11 @@ func NewConnectionStore(config *ConnectionStoreConfig) (*ConnectionStore, error)
 	if err != nil {
 		return nil, err
 	}
-	return &ConnectionStore{objects: config.Objects, scope: config.Scope, prefix: prefix, now: time.Now}, nil
+	store := &ConnectionStore{objects: config.Objects, scope: config.Scope, prefix: prefix, now: time.Now}
+	if config.sharedConnections != nil {
+		store.shared = newSharedConnections(config.sharedConnections)
+	}
+	return store, nil
 }
 
 // ReadConnection reads authoritative safe metadata without refreshing or creating credentials.

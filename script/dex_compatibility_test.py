@@ -15,6 +15,7 @@ from script.dex_compatibility import (
     CREDENTIAL_ISOLATION_MODULE_PATH,
     GO_VET_BUILD_TAG_SETS,
     GITHUB_REQUEST_ATTEMPTS,
+    GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS,
     connector_releases,
     create_module_proxy,
     dex_web_compatibility_sources,
@@ -24,6 +25,7 @@ from script.dex_compatibility import (
     fixture_module_path,
     flow_examples,
     manifests,
+    rate_limit_wait,
     parse_connector_directories,
     require_dex_web_security_tests_passed,
     require_dex_web_tests_passed,
@@ -195,8 +197,8 @@ class LatestDexGoSdkTest(unittest.TestCase):
 class TransientGitHubRetryTest(unittest.TestCase):
     URL = "https://github.com/superdurable/dex/releases/download/cli-v1.5.0/checksums.txt"
 
-    def http_error(self, status: int) -> urllib.error.HTTPError:
-        return urllib.error.HTTPError(self.URL, status, "error", {}, None)
+    def http_error(self, status: int, headers: dict[str, str] | None = None, body: bytes = b"") -> urllib.error.HTTPError:
+        return urllib.error.HTTPError(self.URL, status, "error", headers or {}, io.BytesIO(body))
 
     def test_download_retries_server_errors_until_the_asset_arrives(self) -> None:
         responses = [self.http_error(503), self.http_error(502), io.BytesIO(b"checksums")]
@@ -226,6 +228,51 @@ class TransientGitHubRetryTest(unittest.TestCase):
                 download(self.URL, Path(directory) / "checksums.txt")
         self.assertEqual(urlopen.call_count, 1)
         sleep.assert_not_called()
+
+    def test_download_waits_out_a_secondary_rate_limit_with_jitter(self) -> None:
+        responses = [self.http_error(403, {"retry-after": "7"}), io.BytesIO(b"checksums")]
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("script.dex_compatibility.urllib.request.urlopen", side_effect=responses) as urlopen, \
+                patch("script.dex_compatibility.random.uniform", return_value=0.5) as uniform, \
+                patch("script.dex_compatibility.time.sleep") as sleep:
+            download(self.URL, Path(directory) / "checksums.txt")
+        self.assertEqual(urlopen.call_count, 2)
+        uniform.assert_called_once_with(0, 2)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [7.5])
+
+    def test_download_does_not_retry_a_permission_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("script.dex_compatibility.urllib.request.urlopen", side_effect=[self.http_error(403)]) as urlopen, \
+                patch("script.dex_compatibility.time.sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "download failed: .*403"):
+                download(self.URL, Path(directory) / "checksums.txt")
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_download_fails_a_rate_limit_that_resets_too_late(self) -> None:
+        too_late = str(GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS + 1)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("script.dex_compatibility.urllib.request.urlopen", side_effect=[self.http_error(429, {"retry-after": too_late})]) as urlopen, \
+                patch("script.dex_compatibility.time.sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "download failed: .*429"):
+                download(self.URL, Path(directory) / "checksums.txt")
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_rate_limit_wait_reads_the_headers_github_sends(self) -> None:
+        with patch("script.dex_compatibility.time.time", return_value=1000.0):
+            self.assertEqual(rate_limit_wait(self.http_error(403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1012"})), 12.0)
+            self.assertEqual(rate_limit_wait(self.http_error(403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "990"})), 0.0)
+        self.assertEqual(rate_limit_wait(self.http_error(403, {"x-ratelimit-remaining": "0"})), 60.0)
+        self.assertEqual(rate_limit_wait(self.http_error(429, {"retry-after": "3"})), 3.0)
+        self.assertIsNone(rate_limit_wait(self.http_error(403, {"x-ratelimit-remaining": "12"})))
+        self.assertIsNone(rate_limit_wait(self.http_error(429)))
+        self.assertIsNone(rate_limit_wait(self.http_error(404, {"retry-after": "3"})))
+        secondary = b'{"message": "You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}'
+        self.assertEqual(rate_limit_wait(self.http_error(403, body=secondary)), 60.0)
+        self.assertEqual(rate_limit_wait(self.http_error(429, body=secondary)), 60.0)
+        self.assertIsNone(rate_limit_wait(self.http_error(403, body=b'{"message": "Resource not accessible by integration"}')))
+        self.assertIsNone(rate_limit_wait(self.http_error(403, body=b"<html>forbidden</html>")))
 
 
 if __name__ == "__main__":

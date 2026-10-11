@@ -65,11 +65,17 @@ type Scope struct {
 	Kind string `json:"kind"`
 }
 
+// The kinds of Scope: a Project has one Live and one Preview configuration.
+const (
+	scopeKindLive    = "live"
+	scopeKindPreview = "preview"
+)
+
 var scopeIdentity = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
 
 // Prefix validates the fixed scope and returns its canonical relative storage prefix.
 func (scope Scope) Prefix() (string, error) {
-	if !scopeIdentity.MatchString(scope.ProjectID) || (scope.Kind != "live" && scope.Kind != "preview") {
+	if !scopeIdentity.MatchString(scope.ProjectID) || (scope.Kind != scopeKindLive && scope.Kind != scopeKindPreview) {
 		return "", errors.New("invalid project configuration scope")
 	}
 	return "projects/" + scope.ProjectID + "/" + scope.Kind, nil
