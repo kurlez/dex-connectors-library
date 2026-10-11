@@ -360,9 +360,9 @@ wire values are converted to `SecretString` only at this boundary and cannot be
 serialized again.
 
 A configuration entry may instead name a shared connection with
-`sharedConnectionId`. `LoadFromEnvironment` then reads its settings from the
-document's credential broker, and the same provider constructors resolve its
-credential from the broker: the provider caches it, reads again near expiry,
+`sharedConnectionId`. Its settings are frozen in the document's entry like an
+ordinary entry's, and the same provider constructors resolve its credential
+from the document's credential broker: the provider caches it, reads again near expiry,
 and never calls the connector's refresh driver. A rejected credential that the
 broker returns unchanged makes `ResolveCredentialAfterRejection` return
 `projectconfig.ErrRejectedCredentialNotRefreshed`. A connector maps that error

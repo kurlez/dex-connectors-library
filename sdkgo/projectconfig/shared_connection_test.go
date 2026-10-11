@@ -22,15 +22,19 @@ func requireNoSecrets(t *testing.T, err error) {
 	}
 }
 
-func TestLoadReadsSharedSettingsAndTheFirstCredentialFromTheBroker(t *testing.T) {
-	fixture := newSharedFixture(t, readyReply(1, sharedAccessOne, epoch, time.Hour))
+func TestLoadTakesSettingsFromTheEntryAndTheBrokerIsReadOnFirstUse(t *testing.T) {
+	fixture := newUnreadSharedFixture(t, sharedScope, readyReply(1, sharedAccessOne, epoch, time.Hour))
 
 	var shared, ordinary githubSettings
 	require.NoError(t, fixture.project.Configuration.DecodeConnectionConfiguration(sharedKey, &shared))
 	require.NoError(t, fixture.project.Configuration.DecodeConnectionConfiguration(ordinaryKey, &ordinary))
-	require.Equal(t, 8192, shared.MaxResponseBytes, "a shared entry takes its settings from the broker")
-	require.Equal(t, 4096, ordinary.MaxResponseBytes, "an ordinary entry keeps its own settings")
+	require.Equal(t, 8192, shared.MaxResponseBytes, "a shared entry's settings are frozen in the document")
+	require.Equal(t, 4096, ordinary.MaxResponseBytes)
+	require.Zero(t, fixture.broker.requestCount())
 
+	value, err := fixture.resolver(t).ResolveWithRefresh(context.Background(), forbiddenDriver{t})
+	require.NoError(t, err)
+	require.Equal(t, token{Access: sharedAccessOne, Refresh: "refresh-secret"}, value)
 	require.Equal(t, 1, fixture.broker.requestCount())
 	request := fixture.broker.request(0)
 	require.Equal(t, http.MethodPost, request.method)
@@ -39,10 +43,9 @@ func TestLoadReadsSharedSettingsAndTheFirstCredentialFromTheBroker(t *testing.T)
 	require.Equal(t, "application/json", request.contentType)
 	require.Equal(t, map[string]any{"sharedConnectionId": "conn-7"}, request.body)
 
-	value, err := fixture.resolver(t).ResolveWithRefresh(context.Background(), forbiddenDriver{t})
+	_, err = fixture.resolver(t).Resolve(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, token{Access: sharedAccessOne, Refresh: "refresh-secret"}, value)
-	require.Equal(t, 1, fixture.broker.requestCount(), "the credential read at load is cached")
+	require.Equal(t, 1, fixture.broker.requestCount(), "the credential is cached")
 }
 
 func TestOrdinaryEntriesKeepTheirStoredConnections(t *testing.T) {
@@ -59,7 +62,7 @@ func TestOrdinaryEntriesKeepTheirStoredConnections(t *testing.T) {
 	value, err := resolver.Resolve(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "stored", value.Access)
-	require.Equal(t, 1, fixture.broker.requestCount(), "only the shared entry's load reads the broker")
+	require.Equal(t, 1, fixture.broker.requestCount(), "only the shared entry reads the broker")
 }
 
 func TestSharedCredentialIsReadAgainAtTheProportionalSkew(t *testing.T) {
@@ -466,7 +469,6 @@ func TestBrokerRefusalsAndInvalidAnswersAreRejections(t *testing.T) {
 		"READY without a credential":    {body: map[string]any{"status": "READY", "revision": 2}},
 		"READY with a credential array": {body: map[string]any{"status": "READY", "revision": 2, "credential": []string{sharedAccessOne}}},
 		"READY without a revision":      {body: map[string]any{"status": "READY", "credential": map[string]string{"access": sharedAccessOne}}},
-		"READY with a settings array":   {body: map[string]any{"status": "READY", "revision": 2, "credential": map[string]string{"access": "x"}, "settings": []int{1}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			fixture := newSharedFixture(t, readyReply(1, "first", epoch, time.Minute))
@@ -474,11 +476,6 @@ func TestBrokerRefusalsAndInvalidAnswersAreRejections(t *testing.T) {
 			fixture.broker.respondAlways(reply)
 
 			_, err := fixture.resolver(t).Resolve(context.Background())
-			if name == "READY with a settings array" {
-				// Settings are optional at runtime: an invalid object is ignored, and the credential is used.
-				require.NoError(t, err)
-				return
-			}
 			require.ErrorIs(t, err, projectconfig.ErrCredentialBrokerRejected)
 			requireNoSecrets(t, err)
 			require.Equal(t, 2, fixture.broker.requestCount())
@@ -486,23 +483,23 @@ func TestBrokerRefusalsAndInvalidAnswersAreRejections(t *testing.T) {
 	}
 }
 
-func TestLoadFailsWhileTheBrokerRefusesOrIsUnavailable(t *testing.T) {
-	for name, test := range map[string]struct {
-		reply    brokerReply
-		expected error
-	}{
-		"unavailable": {reply: brokerReply{statusCode: http.StatusBadGateway, raw: "{}"}, expected: projectconfig.ErrCredentialBrokerUnavailable},
-		"refused":     {reply: brokerReply{statusCode: http.StatusUnauthorized, raw: "{}"}, expected: projectconfig.ErrCredentialBrokerRejected},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := tryNewSharedFixture(t, test.reply)
-			require.ErrorIs(t, err, test.expected)
-			requireNoSecrets(t, err)
-		})
-	}
+func TestApplicationStartsWhileTheBrokerIsUnavailable(t *testing.T) {
+	fixture := newUnreadSharedFixture(t, sharedScope, brokerReply{statusCode: http.StatusBadGateway, raw: "{}"})
+	var settings githubSettings
+	require.NoError(t, fixture.project.Configuration.DecodeConnectionConfiguration(sharedKey, &settings))
+
+	_, err := fixture.resolver(t).Resolve(context.Background())
+	require.ErrorIs(t, err, projectconfig.ErrCredentialBrokerUnavailable)
+	requireNoSecrets(t, err)
+
+	fixture.clock.Advance(2 * time.Second)
+	fixture.broker.respondAlways(readyReply(1, sharedAccessOne, fixture.clock.Now(), time.Hour))
+	value, err := fixture.resolver(t).Resolve(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, sharedAccessOne, value.Access, "the first read that finds the broker answers")
 }
 
-func TestLoadSucceedsForAnEntryThatIsNotUsableYetAndReportsItOnUse(t *testing.T) {
+func TestFirstUseReportsAnEntryThatIsNotUsable(t *testing.T) {
 	for name, test := range map[string]struct {
 		status   string
 		expected error
@@ -511,22 +508,11 @@ func TestLoadSucceedsForAnEntryThatIsNotUsableYetAndReportsItOnUse(t *testing.T)
 		"connection not selected":  {status: "CONNECTION_NOT_SELECTED", expected: projectconfig.ErrConnectionNotSelected},
 	} {
 		t.Run(name, func(t *testing.T) {
-			fixture := newSharedFixture(t, brokerReply{body: map[string]any{"status": test.status, "settings": map[string]int{"maxResponseBytes": 1234}}})
-			var settings githubSettings
-			require.NoError(t, fixture.project.Configuration.DecodeConnectionConfiguration(sharedKey, &settings))
-			require.Equal(t, 1234, settings.MaxResponseBytes, "settings that accompany any status are applied")
-
+			fixture := newUnreadSharedFixture(t, sharedScope, statusReply(test.status))
 			_, err := fixture.resolver(t).Resolve(context.Background())
 			require.ErrorIs(t, err, test.expected)
 		})
 	}
-
-	t.Run("without settings", func(t *testing.T) {
-		fixture := newSharedFixture(t, statusReply("CONNECTION_NOT_SELECTED"))
-		var settings githubSettings
-		require.NoError(t, fixture.project.Configuration.DecodeConnectionConfiguration(sharedKey, &settings))
-		require.Zero(t, settings.MaxResponseBytes)
-	})
 }
 
 func TestBrokerTokenIsReadOnceFromItsPinnedSecret(t *testing.T) {

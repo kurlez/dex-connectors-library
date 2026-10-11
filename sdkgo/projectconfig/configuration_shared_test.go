@@ -19,7 +19,10 @@ const (
 	brokerTokenKeyPrefix  = "projects/shared/live/app-secrets/DEX_CREDENTIAL_BROKER_TOKEN/"
 )
 
-var sharedScope = projectconfig.Scope{ProjectID: "shared", Kind: "live"}
+var (
+	sharedScope  = projectconfig.Scope{ProjectID: "shared", Kind: "live"}
+	previewScope = projectconfig.Scope{ProjectID: "shared", Kind: "preview"}
+)
 
 func newConfigurationStore(t *testing.T) (*projectconfig.ConfigurationStore, *testsupport.ObjectStore) {
 	t.Helper()
@@ -41,7 +44,10 @@ func ordinaryEntry(name string) projectconfig.ConnectionConfiguration {
 }
 
 func sharedEntry(name, sharedConnectionID string) projectconfig.ConnectionConfiguration {
-	return projectconfig.ConnectionConfiguration{ConnectorID: "github", ConnectionName: name, ModulePath: "example.test/github", Provider: "github", SharedConnectionID: sharedConnectionID}
+	return projectconfig.ConnectionConfiguration{
+		ConnectorID: "github", ConnectionName: name, ModulePath: "example.test/github", Provider: "github", SharedConnectionID: sharedConnectionID,
+		Configuration: json.RawMessage(`{"maxResponseBytes":8192}`),
+	}
 }
 
 func TestSharedConnectionsRoundTripAtTheCurrentSchemaVersion(t *testing.T) {
@@ -61,22 +67,12 @@ func TestSharedConnectionsRoundTripAtTheCurrentSchemaVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, broker, read.CredentialBroker)
 	require.Equal(t, "conn-7", read.Connections[1].SharedConnectionID)
-	require.Empty(t, read.Connections[1].Configuration)
 	require.Empty(t, read.Connections[0].SharedConnectionID)
-	var settings struct{ MaxResponseBytes int }
-	require.NoError(t, read.DecodeConnectionConfiguration(projectconfig.ConnectionKey{ConnectorID: "github", ConnectionName: "local"}, &settings))
-	require.Equal(t, 4096, settings.MaxResponseBytes)
-}
-
-func TestSharedEntryMayCarryAnEmptySettingsObject(t *testing.T) {
-	store, _ := newConfigurationStore(t)
-	entry := sharedEntry("releases", "conn-7")
-	entry.Configuration = json.RawMessage(`{}`)
-	_, _, err := store.WriteConfiguration(context.Background(), 0, projectconfig.Configuration{
-		Connections:      []projectconfig.ConnectionConfiguration{entry},
-		CredentialBroker: credentialBroker(t, store, "https://broker.example.test/read"),
-	})
-	require.NoError(t, err)
+	var ordinary, shared githubSettings
+	require.NoError(t, read.DecodeConnectionConfiguration(ordinaryKey, &ordinary))
+	require.Equal(t, 4096, ordinary.MaxResponseBytes)
+	require.NoError(t, read.DecodeConnectionConfiguration(sharedKey, &shared))
+	require.Equal(t, 8192, shared.MaxResponseBytes, "a shared entry keeps its settings in the document")
 }
 
 func TestDocumentWithoutSharedConnectionsKeepsThePreviousSchemaVersion(t *testing.T) {
@@ -100,7 +96,7 @@ func TestPreviousSchemaVersionDocumentLoadsAndRejectsSharedConnections(t *testin
 			`"connections":[` + connection + `],"triggerBindings":[],"operationConfigurations":[]}`)
 	}
 	ordinary := `{"connectorId":"github","connectionName":"local","modulePath":"example.test/github","provider":"github","configuration":{"maxResponseBytes":4096}}`
-	shared := `{"connectorId":"github","connectionName":"local","modulePath":"example.test/github","provider":"github","sharedConnectionId":"conn-7"}`
+	shared := `{"connectorId":"github","connectionName":"local","modulePath":"example.test/github","provider":"github","sharedConnectionId":"conn-7","configuration":{}}`
 
 	for name, test := range map[string]struct {
 		connection string
@@ -163,14 +159,14 @@ func TestInvalidSharedConnectionDocumentsAreRejectedBeforeWriting(t *testing.T) 
 		return &changed
 	}
 	shared := []projectconfig.ConnectionConfiguration{sharedEntry("releases", "conn-7")}
-	withSettings := sharedEntry("releases", "conn-7")
-	withSettings.Configuration = json.RawMessage(`{"maxResponseBytes":4096}`)
+	sharedWithoutSettings := sharedEntry("releases", "conn-7")
+	sharedWithoutSettings.Configuration = nil
 	withoutSettings := ordinaryEntry("local")
 	withoutSettings.Configuration = nil
 
 	for name, configuration := range map[string]projectconfig.Configuration{
 		"shared entry without a broker":     {Connections: shared},
-		"shared entry with settings":        {Connections: []projectconfig.ConnectionConfiguration{withSettings}, CredentialBroker: broker},
+		"shared entry without settings":     {Connections: []projectconfig.ConnectionConfiguration{sharedWithoutSettings}, CredentialBroker: broker},
 		"ordinary entry without settings":   {Connections: []projectconfig.ConnectionConfiguration{withoutSettings}},
 		"shared connection ID with a path":  {Connections: []projectconfig.ConnectionConfiguration{sharedEntry("releases", "../conn")}, CredentialBroker: broker},
 		"shared connection ID with a space": {Connections: []projectconfig.ConnectionConfiguration{sharedEntry("releases", "conn 7")}, CredentialBroker: broker},

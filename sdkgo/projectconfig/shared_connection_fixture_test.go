@@ -184,8 +184,7 @@ func (broker *testBroker) request(index int) brokerRequest {
 // readyReply is a READY answer for a credential issued at issuedAt that expires after lifetime.
 func readyReply(revision uint64, access string, issuedAt time.Time, lifetime time.Duration) brokerReply {
 	return brokerReply{body: map[string]any{
-		"status": "READY", "credential": map[string]string{"access": access, "refresh": "refresh-secret"},
-		"settings": map[string]int{"maxResponseBytes": 8192}, "revision": revision,
+		"status": "READY", "credential": map[string]string{"access": access, "refresh": "refresh-secret"}, "revision": revision,
 		"issuedAt": issuedAt.Format(time.RFC3339Nano), "expiresAt": issuedAt.Add(lifetime).Format(time.RFC3339Nano),
 	}}
 }
@@ -194,7 +193,7 @@ func readyReply(revision uint64, access string, issuedAt time.Time, lifetime tim
 func staticReply(revision uint64, access string) brokerReply {
 	return brokerReply{body: map[string]any{
 		"status": "READY", "credential": map[string]string{"access": access},
-		"settings": map[string]int{"maxResponseBytes": 8192}, "revision": revision,
+		"revision": revision,
 		"issuedAt": epoch.Format(time.RFC3339Nano),
 	}}
 }
@@ -205,6 +204,7 @@ func statusReply(status string) brokerReply {
 
 // sharedFixture is a loaded project whose "releases" entry is shared and whose "local" entry is ordinary.
 type sharedFixture struct {
+	scope          projectconfig.Scope
 	clock          *testClock
 	objects        *recordingObjectStore
 	configurations *projectconfig.ConfigurationStore
@@ -215,17 +215,31 @@ type sharedFixture struct {
 	allowsStoredConnections bool
 }
 
-// newSharedFixture serves the first load from first and fails the test when the project does not load.
+// newSharedFixture loads a Live project whose broker serves first, and reads it once so the credential is cached.
 func newSharedFixture(t *testing.T, first brokerReply) *sharedFixture {
 	t.Helper()
-	fixture, err := tryNewSharedFixture(t, first)
+	return warmedSharedFixture(t, sharedScope, first)
+}
+
+// newPreviewFixture is newSharedFixture for a Preview project, whose configuration may select another connection.
+func newPreviewFixture(t *testing.T, first brokerReply) *sharedFixture {
+	t.Helper()
+	return warmedSharedFixture(t, previewScope, first)
+}
+
+func warmedSharedFixture(t *testing.T, scope projectconfig.Scope, first brokerReply) *sharedFixture {
+	t.Helper()
+	fixture := newUnreadSharedFixture(t, scope, first)
+	_, err := fixture.resolver(t).Resolve(context.Background())
 	require.NoError(t, err)
+	require.Equal(t, 1, fixture.broker.requestCount())
 	return fixture
 }
 
-func tryNewSharedFixture(t *testing.T, first brokerReply) (*sharedFixture, error) {
+// newUnreadSharedFixture loads the project and proves that loading does not read the broker.
+func newUnreadSharedFixture(t *testing.T, scope projectconfig.Scope, first brokerReply) *sharedFixture {
 	t.Helper()
-	fixture := &sharedFixture{clock: &testClock{now: epoch}, objects: &recordingObjectStore{inner: testsupport.NewObjectStore()}, broker: &testBroker{}}
+	fixture := &sharedFixture{scope: scope, clock: &testClock{now: epoch}, objects: &recordingObjectStore{inner: testsupport.NewObjectStore()}, broker: &testBroker{}}
 	fixture.broker.respondAlways(first)
 	mux := http.NewServeMux()
 	mux.Handle(brokerPath, fixture.broker)
@@ -238,11 +252,13 @@ func tryNewSharedFixture(t *testing.T, first brokerReply) (*sharedFixture, error
 	})
 
 	var err error
-	fixture.configurations, err = projectconfig.NewConfigurationStore(&projectconfig.ConfigurationStoreConfig{Objects: fixture.objects, Scope: sharedScope})
+	fixture.configurations, err = projectconfig.NewConfigurationStore(&projectconfig.ConfigurationStoreConfig{Objects: fixture.objects, Scope: scope})
 	require.NoError(t, err)
 	reference := fixture.writeConfiguration(t, 0, "conn-7")
-	fixture.project, err = projectconfig.LoadProjectForTest(context.Background(), fixture.objects, sharedScope, reference, nil, fixture.clock.Now)
-	return fixture, err
+	fixture.project, err = projectconfig.LoadProjectForTest(context.Background(), fixture.objects, scope, reference, nil, fixture.clock.Now)
+	require.NoError(t, err)
+	require.Zero(t, fixture.broker.requestCount(), "loading a project never reads the broker")
+	return fixture
 }
 
 // writeConfiguration writes the document at expectedRevision, selecting sharedConnectionID for "releases", and freezes it.

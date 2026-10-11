@@ -27,16 +27,15 @@ type LoadedProject struct {
 	// credential through the credential broker.
 	Connections *ConnectionStore
 	// Configuration is the exact ordinary snapshot accepted for this application instance.
-	// The settings of a shared entry are the broker's, read once at load.
 	Configuration Configuration
 	// Snapshot identifies the exact immutable configuration object version and digest.
 	Snapshot SnapshotRef
 }
 
 // LoadFromEnvironment loads the trusted DEX_PROJECT_* deployment contract and AWS default credential chain.
-// It reads only the pinned ordinary snapshot at startup; no stored credential read or provider refresh occurs.
-// A snapshot with shared entries also reads each one's settings and credential from the credential broker,
-// which must be reachable, and settings changes apply on the next start.
+// It reads only the pinned ordinary snapshot at startup; no credential read or provider refresh occurs.
+// A shared entry's credential is read from the credential broker when a call first uses it, so an application
+// starts while the broker is unavailable.
 // Hosted storage requires an exact KMS key ARN. Local S3 endpoints require explicit local-storage opt-in.
 func LoadFromEnvironment(ctx context.Context) (*LoadedProject, error) {
 	scope := Scope{ProjectID: os.Getenv("DEX_PROJECT_ID"), Kind: os.Getenv("DEX_PROJECT_SCOPE")}
@@ -82,7 +81,7 @@ type brokerClientOptions struct {
 	now        func() time.Time
 }
 
-// loadProject reads the pinned snapshot, builds the stores, and reads each shared entry's settings.
+// loadProject reads the pinned snapshot and builds the stores.
 func loadProject(ctx context.Context, objects ObjectStore, scope Scope, reference SnapshotRef, options brokerClientOptions) (*LoadedProject, error) {
 	configurations, err := NewConfigurationStore(&ConfigurationStoreConfig{Objects: objects, Scope: scope})
 	if err != nil {
@@ -100,11 +99,7 @@ func loadProject(ctx context.Context, objects ObjectStore, scope Scope, referenc
 	if err != nil {
 		return nil, err
 	}
-	project := &LoadedProject{objects: objects, scope: scope, configurations: configurations, Connections: connections, Configuration: configuration, Snapshot: reference}
-	if err = project.loadSharedConnectionSettings(ctx); err != nil {
-		return nil, err
-	}
-	return project, nil
+	return &LoadedProject{objects: objects, scope: scope, configurations: configurations, Connections: connections, Configuration: configuration, Snapshot: reference}, nil
 }
 
 // TriggerInbox binds one Trigger binding's durable inbox in the loaded project scope.

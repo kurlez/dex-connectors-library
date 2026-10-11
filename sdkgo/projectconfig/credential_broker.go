@@ -20,8 +20,8 @@ const credentialBrokerReadTimeout = 40 * time.Second
 
 const maximumCredentialBrokerResponseBytes = 1 << 20
 
-// maximumBrokerObjectBytes bounds the credential and the settings objects of one response.
-const maximumBrokerObjectBytes = 64 << 10
+// maximumBrokerCredentialBytes bounds the credential object of one response.
+const maximumBrokerCredentialBytes = 64 << 10
 
 var (
 	// ErrConnectionNotSelected reports that the credential broker no longer lets this scope use the shared connection,
@@ -57,7 +57,6 @@ type credentialBrokerRequest struct {
 type credentialBrokerResponse struct {
 	Status     string          `json:"status"`
 	Credential json.RawMessage `json:"credential"`
-	Settings   json.RawMessage `json:"settings"`
 	Revision   uint64          `json:"revision"`
 	IssuedAt   *time.Time      `json:"issuedAt"`
 	ExpiresAt  *time.Time      `json:"expiresAt"`
@@ -73,11 +72,10 @@ type brokerCredential struct {
 	readAt time.Time
 }
 
-// credentialBrokerAnswer is a validated answer; settings may accompany any status.
+// credentialBrokerAnswer is a validated answer; credential is meaningful only for credentialBrokerReady.
 type credentialBrokerAnswer struct {
 	status     credentialBrokerStatus
 	credential brokerCredential
-	settings   json.RawMessage
 }
 
 // credentialBroker is the HTTP client of the broker's credential read endpoint.
@@ -170,9 +168,6 @@ func decodeCredentialBrokerAnswer(contents []byte) (credentialBrokerAnswer, erro
 		return invalid("response is not a JSON object")
 	}
 	answer := credentialBrokerAnswer{status: credentialBrokerStatus(response.Status)}
-	if len(response.Settings) > 0 && len(response.Settings) <= maximumBrokerObjectBytes && isJSONObject(response.Settings) {
-		answer.settings = response.Settings
-	}
 	switch answer.status {
 	case credentialBrokerReauthorizationRequired, credentialBrokerConnectionNotSelected:
 		return answer, nil
@@ -180,7 +175,7 @@ func decodeCredentialBrokerAnswer(contents []byte) (credentialBrokerAnswer, erro
 	default:
 		return invalid("response status is unknown")
 	}
-	if len(response.Credential) == 0 || len(response.Credential) > maximumBrokerObjectBytes || !isJSONObject(response.Credential) {
+	if len(response.Credential) == 0 || len(response.Credential) > maximumBrokerCredentialBytes || !isJSONObject(response.Credential) {
 		return invalid("response credential is not a JSON object")
 	}
 	if response.Revision == 0 {

@@ -30,15 +30,15 @@ type ConnectionConfiguration struct {
 	Provider string `json:"provider"`
 	// AuthMethodID is the selected authorization method, or empty when the connector declares one.
 	AuthMethodID string `json:"authMethodId,omitempty"`
-	// SharedConnectionID selects a shared connection. The credential broker then serves the entry's credential
-	// and settings, so Configuration stays empty and the entry never reads or writes the connection's stored credential.
+	// SharedConnectionID selects a shared connection. The credential broker then serves the entry's credential,
+	// and the entry never reads or writes the connection's stored credential. Configuration still holds its settings.
 	SharedConnectionID string `json:"sharedConnectionId,omitempty"`
 	// Configuration contains manifest-validated ordinary values; secret fields must be excluded by Dex Web.
-	// A shared entry carries none: it is absent or an empty object.
-	Configuration json.RawMessage `json:"configuration,omitempty"`
+	// A shared entry holds the shared connection's settings as they were when the document was written.
+	Configuration json.RawMessage `json:"configuration"`
 }
 
-// CredentialBrokerConfiguration locates the service that serves the credentials and settings of shared connections.
+// CredentialBrokerConfiguration locates the service that serves the credentials of shared connections.
 type CredentialBrokerConfiguration struct {
 	// Endpoint is the absolute URL that receives each credential read. It is https, or http for a loopback, private,
 	// single-label or cluster-local host.
@@ -266,7 +266,7 @@ func validateConfiguration(configuration Configuration) error {
 	connections := make(map[ConnectionKey]bool)
 	for _, connection := range configuration.Connections {
 		key := ConnectionKey{ConnectorID: connection.ConnectorID, ConnectionName: connection.ConnectionName}
-		if !regexpConnectorID(key.ConnectorID) || key.ConnectionName == "" || connection.ModulePath == "" || connection.Provider == "" || !hasValidEntrySettings(connection) || connections[key] {
+		if !regexpConnectorID(key.ConnectorID) || key.ConnectionName == "" || connection.ModulePath == "" || connection.Provider == "" || !isJSONObject(connection.Configuration) || connections[key] {
 			return errors.New("configuration connection is invalid or duplicated")
 		}
 		connections[key] = true
@@ -288,15 +288,6 @@ func validateConfiguration(configuration Configuration) error {
 		operations[key] = true
 	}
 	return nil
-}
-
-// hasValidEntrySettings requires an ordinary entry to carry a settings object and a shared entry to carry none.
-func hasValidEntrySettings(connection ConnectionConfiguration) bool {
-	if connection.SharedConnectionID == "" {
-		return isJSONObject(connection.Configuration)
-	}
-	var settings map[string]json.RawMessage
-	return len(connection.Configuration) == 0 || (strictJSON(connection.Configuration, &settings) == nil && len(settings) == 0)
 }
 
 func isJSONObject(contents json.RawMessage) bool {

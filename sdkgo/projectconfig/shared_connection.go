@@ -5,7 +5,6 @@ package projectconfig
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -133,22 +132,6 @@ func (connection *sharedConnection) credentialAfterRejection(ctx context.Context
 		return brokerCredential{}, ErrRejectedCredentialNotRefreshed
 	}
 	return credential, nil
-}
-
-// prime reads at load and returns the settings. A status other than READY is reported on first use.
-func (connection *sharedConnection) prime(ctx context.Context) (json.RawMessage, error) {
-	if err := connection.acquireReadSlot(ctx); err != nil {
-		return nil, err
-	}
-	defer connection.releaseReadSlot()
-	answer, err := connection.broker.read(ctx, connection.currentSharedConnectionID(), 0)
-	if err != nil {
-		return nil, err
-	}
-	if answer.status == credentialBrokerReady && !isExpired(answer.credential, connection.now()) {
-		connection.remember(answer.credential)
-	}
-	return answer.settings, nil
 }
 
 // read asks the broker. CONNECTION_NOT_SELECTED rereads the document once and follows a changed selection.
@@ -320,26 +303,4 @@ func isStale(credential brokerCredential, now time.Time) bool {
 
 func isExpired(credential brokerCredential, now time.Time) bool {
 	return credential.expiresAt != nil && !now.Before(*credential.expiresAt)
-}
-
-// loadSharedConnectionSettings fills each shared entry's settings from the broker and caches its first credential.
-func (project *LoadedProject) loadSharedConnectionSettings(ctx context.Context) error {
-	if project.Connections.shared == nil {
-		return nil
-	}
-	for index, entry := range project.Configuration.Connections {
-		if entry.SharedConnectionID == "" {
-			continue
-		}
-		key := ConnectionKey{ConnectorID: entry.ConnectorID, ConnectionName: entry.ConnectionName}
-		settings, err := project.Connections.shared.entries[key].prime(ctx)
-		if err != nil {
-			return fmt.Errorf("shared connection %q of connector %q: %w", entry.ConnectionName, entry.ConnectorID, err)
-		}
-		if len(settings) == 0 {
-			settings = json.RawMessage(`{}`)
-		}
-		project.Configuration.Connections[index].Configuration = settings
-	}
-	return nil
 }

@@ -73,7 +73,7 @@ so applications built before `v1alpha3` still read it.
 {
   "schemaVersion": "connectors.dex.dev/project-configuration/v1alpha3",
   "connections": [
-    {"connectorId": "github", "connectionName": "releases", "modulePath": "...", "provider": "github", "sharedConnectionId": "conn-7"}
+    {"connectorId": "github", "connectionName": "releases", "modulePath": "...", "provider": "github", "sharedConnectionId": "conn-7", "configuration": {"maxResponseBytes": 8192}}
   ],
   "credentialBroker": {
     "endpoint": "https://broker.example.test/internal/connection-credentials/read",
@@ -82,9 +82,10 @@ so applications built before `v1alpha3` still read it.
 }
 ```
 
-- `sharedConnectionId` is an entry field. The entry carries no `configuration`
-  (it is absent or `{}`) and no credential, and a document with a shared entry
-  must declare `credentialBroker`.
+- `sharedConnectionId` is an entry field. The entry carries no credential. Its
+  `configuration` holds the shared connection's current settings, which the
+  writer copies into the document like an ordinary entry's, so they are frozen
+  with a snapshot. A document with a shared entry must declare `credentialBroker`.
 - `credentialBroker.endpoint` is an absolute `https` URL, or `http` for a
   loopback, private, single-label or cluster-local host.
 - `credentialBroker.tokenSecretRef` pins the scope token as a private object
@@ -113,7 +114,6 @@ broker answers HTTP 200 with a JSON object; unknown members are ignored:
 | --- | --- |
 | `status` | `READY`, `REAUTHORIZATION_REQUIRED` or `CONNECTION_NOT_SELECTED`. |
 | `credential` | `READY` only. The complete credential object that the connector's generated `decodeCredentials` accepts, at most 64 KiB. |
-| `settings` | Optional, with any status. The same object as an ordinary entry's `configuration`. |
 | `revision` | `READY` only. A positive integer that changes whenever the credential changes. |
 | `issuedAt` | `READY`. When the credential was issued, as RFC 3339; absent when unknown. |
 | `expiresAt` | `READY`. When it expires, as RFC 3339; absent or `null` for a credential that does not expire. |
@@ -135,12 +135,12 @@ unchanged.
 
 ### Resolution
 
-`LoadFromEnvironment` reads the broker once for each shared entry before it
-returns. It fills the entry's settings into `LoadedProject.Configuration`, so
-the connector's generated `NewProjectConnection` decodes them like an ordinary
-entry's, and it caches the first credential. The generated code does not
-change: `provider.NewCredentialProvider` and `NewRefreshingCredentialProvider`
-route an entry that the document marks as shared to the broker.
+`LoadFromEnvironment` does not read the broker, so an application starts while
+the broker is unavailable, and only a call's credential read waits for it. The
+connector's generated `NewProjectConnection` decodes the entry's settings from
+the document like an ordinary entry's. The generated code does not change:
+`provider.NewCredentialProvider` and `NewRefreshingCredentialProvider` route an
+entry that the document marks as shared to the broker.
 
 A shared entry then behaves like this:
 
@@ -174,9 +174,7 @@ A shared entry then behaves like this:
   credential is never returned.
 - Callers that arrive within 2 seconds of a failed read share its failure.
 
-Limits: settings are read once at load, so a settings change applies when the
-application restarts, and an application whose broker is unreachable at start
-fails to load.
+A settings change reaches an application only through a new document.
 
 ## Admission, recovery, and refresh
 
