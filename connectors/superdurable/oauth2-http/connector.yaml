@@ -1,0 +1,140 @@
+apiVersion: connectors.dex.dev/v1alpha1
+kind: Connector
+metadata:
+  name: oauth2-http
+  displayName: OAuth 2.0 HTTP
+  description: "Call any HTTP API that an OAuth 2.0 authorization server protects, such as a Keycloak realm or an internal service: the connection names the server's endpoints and scopes, the host authorizes it with PKCE, and the connector refreshes the access token before it expires."
+  company: Super Durable
+  version: v0.1.0
+spec:
+  provider: oauth2-http
+  codegen:
+    go:
+      package: oauth2http
+  configuration:
+    fields:
+      - name: authorizationEndpoint
+        goName: AuthorizationEndpoint
+        type: url
+        description: "URL of the authorization server's OAuth 2.0 authorization endpoint, where Dex Web sends the user to approve access. Copy the authorization_endpoint value from the server's discovery document at <issuer>/.well-known/openid-configuration, or from its admin console; a Keycloak realm shows it as https://HOST/realms/REALM/protocol/openid-connect/auth. An http:// URL is accepted for a server on a private network, but then the authorization code and the tokens cross the network unencrypted. Required: authorization cannot start without it."
+        required: true
+      - name: tokenEndpoint
+        goName: TokenEndpoint
+        type: url
+        description: "URL of the authorization server's OAuth 2.0 token endpoint, which Dex Web calls to exchange the authorization code and the connector calls to refresh the access token. Copy the token_endpoint value from the same discovery document; a Keycloak realm shows it as https://HOST/realms/REALM/protocol/openid-connect/token. An http:// URL is accepted for a server on a private network, but then the client secret and the refresh token cross the network unencrypted. Required: neither authorization nor refresh can run without it."
+        required: true
+      - name: scopes
+        goName: Scopes
+        type: stringList
+        description: "Scopes to request, one per entry, spelled as the authorization server names them, such as openid, profile, or email for an OpenID Connect server and the API's own scope names otherwise. Find them under the server's client or API settings. Request only what the API calls need; a refresh can never widen them. Required: at least one scope."
+        required: true
+      - name: tokenEndpointAuthMethod
+        goName: TokenEndpointAuthMethod
+        type: enum
+        enum: [client_secret_post, client_secret_basic]
+        description: "How the connector presents the client ID and client secret when it refreshes the access token: client_secret_post sends them in the request body and client_secret_basic in an HTTP Basic Authorization header. Use the method the OAuth client is registered with; most servers accept both, and a server that registers a client as client_secret_basic only (the method RFC 6749 requires every server to support) rejects client_secret_post. Blank uses the default."
+        required: false
+        default: client_secret_post
+      - name: apiBaseUrl
+        goName: APIBaseURL
+        type: url
+        description: "Base URL of the OAuth-protected API, such as https://api.example.com/v2 or the authorization server's own origin for its UserInfo endpoint. A request path is appended to it, and an absolute request URL must have the same scheme, host, and port: the access token is never sent anywhere else. It carries no user information, query, or fragment. An http:// URL is accepted for a server on a private network, but then the access token crosses the network unencrypted. Required: no request can be sent without it."
+        required: true
+      - name: maxBodyBytes
+        goName: MaxBodyBytes
+        type: integer
+        description: "Largest request body, in bytes, that sendRequest sends and largest response body it returns; a longer response is cut at this size and marked truncated, and a longer request body selects defect. Enter a positive integer only to change this safety limit, for example when the API returns documents larger than the default. Blank uses the default."
+        required: false
+        default: 1048576
+      - name: requestTimeout
+        goName: RequestTimeout
+        type: duration
+        description: "Longest time one HTTP request to the API or to the token endpoint may take, as a positive Go duration such as 15s. It must leave room for a token refresh and a second request inside the 30-second Execute limit, so keep it at or below the default unless the Step's Execute timeout is raised. Blank uses the default."
+        required: false
+        default: 12s
+  auth:
+    type: oauth2
+    connectionKind: oauth2-http
+    refreshable: true
+    fields:
+      - name: oauth_client_id
+        goName: OAuthClientID
+        type: string
+        description: "Non-secret client ID of the OAuth client that represents this application at the authorization server. Create a confidential client there first (a Keycloak realm lists clients under Clients > Create client with Client authentication on) and copy its ID from the client's settings; blank means authorization and refresh cannot start."
+        required: true
+      - name: oauth_client_secret
+        goName: OAuthClientSecret
+        type: secretString
+        description: "Secret client secret of the same OAuth client, copied from its credentials page (Clients > the client > Credentials in Keycloak). Dex Web stores it only in this credential field and sends it only to the token endpoint; blank means authorization and refresh cannot start."
+        required: true
+      - name: access_token
+        goName: AccessToken
+        type: secretString
+        description: "Secret OAuth access token produced automatically by the authorization; the connector refreshes it before it expires, so never enter it manually, and blank means Connect has not completed."
+        required: true
+      - name: refresh_token
+        goName: RefreshToken
+        type: secretString
+        description: "Secret OAuth refresh token produced automatically by the authorization, when the server issues one; every refresh may return a replacement that Dex stores, so never enter it manually. Blank means the server issued none, so the connection must be authorized again once the access token expires."
+        required: false
+    guide:
+      startURL: https://github.com/superdurable/dex-connectors-library/tree/main/connectors/superdurable/oauth2-http#authorization-server-setup
+      steps:
+        - "Open the admin console of the authorization server that protects the API, such as a Keycloak realm, and create a confidential OAuth client for the authorization code flow with PKCE; turn Client authentication on so the server issues a client secret."
+        - "Add the exact Redirect URI that Dex Web displays below to the client's valid redirect URIs, and allow the scopes you list in the connection settings; if you want long-lived access, let the client issue refresh tokens, and note that a server which invalidates a refresh token when it is used is supported."
+        - "Fill in the authorization endpoint, token endpoint, scopes, and API base URL in the connection settings from the server's discovery document, and copy the client ID and client secret into the fields below."
+        - "Choose Connect and approve access at the authorization server; to stop access later, revoke the client's session or secret at the server and connect again."
+    oauth2:
+      protocol: oauth2
+      authorizationEndpoint: {fromSetting: authorizationEndpoint}
+      tokenEndpoint: {fromSetting: tokenEndpoint}
+      scopes: {fromSetting: scopes}
+      clientIDCredential: oauth_client_id
+      clientSecretCredential: oauth_client_secret
+      credentialMappings:
+        - {credential: access_token, source: access_token}
+        - {credential: refresh_token, source: refresh_token}
+      pkce: true
+  operations:
+    - name: sendRequest
+      goName: SendRequest
+      inputType: SendRequestInput
+      outputType: SendRequestOutput
+      kind: mutation
+      description: "Send one HTTP request to the connection's API with the OAuth access token as a Bearer credential, and return the status code and body. Refreshes the token first when it is about to expire and once more after a 401. GET, HEAD, and OPTIONS are retried on a transient failure; any other method whose request may have reached the API selects uncertain instead of repeating it."
+      idempotency: required
+      branches:
+        - {id: completed, goName: Completed, description: "The API answered 2xx; the Result carries the status code and body."}
+        - {id: rejected, goName: Rejected, description: "The API answered a redirect or a 4xx other than 408 and 429, or the connection's authorization could not be renewed. The Result carries the status code, which is zero when no request was sent.", optional: true}
+        - {id: uncertain, goName: Uncertain, description: "The request may have reached the API, but a method that is not safe to repeat got no usable answer: the connection closed, timed out, or the API answered 5xx.", optional: true}
+        - {id: defect, goName: Defect, description: "The input or the connection settings are invalid, so no request was sent.", optional: true}
+      execution:
+        executeMethodTimeout: 30s
+        durability: async
+        retry: {initialInterval: 1s, backoffCoefficient: 2, maximumInterval: 30s, maximumAttempts: 5, totalDuration: 2m}
+      mocks:
+        - name: userProfile
+          branch: completed
+          description: The API answered 200 with a small JSON document.
+          default: true
+          output: {statusCode: 200, contentType: application/json, body: "{\"sub\":\"user-1\",\"preferred_username\":\"alice\"}"}
+        - name: notFound
+          branch: rejected
+          description: The API answered 404 for the requested path.
+          output: {statusCode: 404, contentType: application/json, body: "{\"error\":\"not_found\"}"}
+          failure: {kind: NOT_FOUND, message: The API answered HTTP 404.}
+        - name: authorizationExpired
+          branch: rejected
+          description: The server refused to renew the authorization, so no request was sent.
+          output: {statusCode: 0}
+          failure: {kind: AUTHENTICATION, message: The OAuth authorization must be renewed in Dex Web Connections.}
+        - name: connectionLost
+          description: The connection closed after a POST was sent, so the API may have processed it.
+          uncertain: {failure: {kind: TRANSPORT, message: The connection closed before the API answered.}}
+        - name: invalidPath
+          branch: defect
+          description: The request path is not an absolute path, so no request is sent.
+          failure: {kind: VALIDATION, message: The request path must start with a slash.}
+        - name: throttled
+          description: The API throttles the request once before processing it.
+          retry: {failure: {kind: RATE_LIMIT, message: The API answered HTTP 429.}, after: 2s}
