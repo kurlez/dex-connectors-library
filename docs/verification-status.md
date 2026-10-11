@@ -28,7 +28,7 @@ Last reviewed against `main` at `f5c9edf` (2026-10-01).
 | Level | Count | Connectors |
 |---|---|---|
 | Live | 7 | github, google/gemini, hackernews, mysql, postgresql, slack, spotify |
-| Partial live | 11 | amazon/s3, atlassian/trello, calendly, google/gmail, intercom, microsoft/excel, microsoft/onedrive, microsoft/outlook-calendar, monday, typeform, xero |
+| Partial live | 12 | amazon/s3, atlassian/trello, calendly, google/gmail, intercom, microsoft/excel, microsoft/onedrive, microsoft/outlook-calendar, monday, superdurable/oauth2-http, typeform, xero |
 | Dex-integrated | 28 | every other connector except the three below |
 | Structural | 3 | google/spreadsheet, linkedin, stripe |
 
@@ -78,6 +78,7 @@ Last reviewed against `main` at `f5c9edf` (2026-10-01).
 | stripe | Structural | unit tests, signed webhook fixtures, compatibility gate; no Dex run recorded | test-mode Checkout, live webhook delivery | #66, #136 |
 | superdurable/email | Dex-integrated | Dex Web Start Flow run against in-process IMAP and SMTP servers | Fastmail, iCloud, and Yahoo logins; search semantics; Sent-folder saving | #171 |
 | superdurable/llm | Dex-integrated | one provider per connection; the shared real-Dex scenarios ran for all 9 providers against fakes; `-tags=live` not run | live generation with each provider's real key, regional hosts, the model picker in Dex Web | #123 |
+| superdurable/oauth2-http | Partial live | authorization code flow with PKCE, token refresh, and UserInfo through `sendRequest` over plain http against Keycloak 26.8 (60-second access tokens, single-use refresh tokens); example on real Dex against a fake | Dex Web's authorization callback and credential provider, hosted identity providers, `client_secret_basic` against a real server, a server without refresh tokens | pending |
 | superdurable/webhook | Dex-integrated | Dex Web connection and run; a forged request was rejected; senders simulated locally | real GitHub, Shopify, and Typeform senders; public HTTPS ingress | #137 |
 | twilio/messaging | Dex-integrated | Dex runs and 7 real-Dex tests against a fake Twilio | real response and status codes, regional endpoints | #141 |
 | typeform | Partial live | a dummy-token request to the real API returned 403 | webhook `event_id` stability, answer shapes, 429 | #158 |
