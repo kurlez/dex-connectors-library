@@ -261,21 +261,48 @@ func TestNewAddressPolicyClientRejectsWhatItCannotGuard(t *testing.T) {
 	}
 }
 
-func TestNewAddressPolicyClientKeepsThePolicyOfAClientItReturned(t *testing.T) {
+func TestNewAddressPolicyClientKeepsTheTransportOfAClientItReturnedUnderTheSamePolicy(t *testing.T) {
 	servers := newAddressServers(t)
 	network := newStubNetwork(t, servers.plain.Listener.Addr().String(), "10.0.0.1")
 	first, err := providerhttp.NewAddressPolicyClientForTest(nil, time.Second, providerhttp.PrivateNetworkHTTP, network.resolve, network.dial)
 	require.NoError(t, err)
 
-	second, err := providerhttp.NewAddressPolicyClient(first, 3*time.Second, providerhttp.PublicHTTPS)
+	second, err := providerhttp.NewAddressPolicyClient(first, 3*time.Second, providerhttp.PrivateNetworkHTTP)
 	require.NoError(t, err)
 
 	parsed, err := url.Parse(servers.plain.URL)
 	require.NoError(t, err)
 	response, err := second.Get("http://internal.test:" + parsed.Port() + "/")
-	require.NoError(t, err, "the second call keeps the first call's policy and network")
+	require.NoError(t, err, "the second call keeps the first call's transport and network")
 	require.NoError(t, response.Body.Close())
 	require.Equal(t, []string{net.JoinHostPort("10.0.0.1", parsed.Port())}, network.dialedAddresses())
+}
+
+func TestNewAddressPolicyClientRebuildsAClientItReturnedUnderAStricterPolicy(t *testing.T) {
+	servers := newAddressServers(t)
+	parsed, err := url.Parse(servers.plain.URL)
+	require.NoError(t, err)
+	securePort, err := url.Parse(servers.secure.URL)
+	require.NoError(t, err)
+	for _, request := range []struct{ scheme, port, target string }{
+		{"http", parsed.Port(), servers.plain.Listener.Addr().String()},
+		{"https", securePort.Port(), servers.secure.Listener.Addr().String()},
+	} {
+		network := newStubNetwork(t, request.target, "10.0.0.1")
+		permissive, err := providerhttp.NewAddressPolicyClientForTest(
+			servers.secure.Client(), time.Second, providerhttp.PrivateNetworkHTTP, network.resolve, network.dial,
+		)
+		require.NoError(t, err)
+
+		strict, err := providerhttp.NewAddressPolicyClientForTest(
+			permissive, time.Second, providerhttp.PublicHTTPS, network.resolve, network.dial,
+		)
+		require.NoError(t, err)
+
+		_, err = strict.Get(request.scheme + "://example.com:" + request.port + "/")
+		require.ErrorIs(t, err, providerhttp.ErrAddressNotAllowed, request.scheme)
+		require.Empty(t, network.dialedAddresses(), request.scheme)
+	}
 }
 
 func TestAddressRefusalMatchesTheSentinelAndNamesOnlyTheRule(t *testing.T) {

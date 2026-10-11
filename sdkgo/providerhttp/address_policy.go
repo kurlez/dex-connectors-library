@@ -80,8 +80,9 @@ func systemAddressNetwork() addressNetwork {
 // caller's transport must be nil or an *http.Transport; any other transport returns an error, because the
 // client must own the dialer. The copy keeps the transport's TLS and connection-pool settings and ignores
 // its proxy settings, because a proxy would receive the connection instead of the address that was checked.
-// The caller's client and transport are not changed. A client that an earlier call returned keeps the
-// policy it was built with.
+// The caller's client and transport are not changed. A client that an earlier call returned keeps its
+// transport when policy is the same; under another policy it is rebuilt from its original transport, so a
+// client is never left more permissive than the policy requested.
 //
 // A refused connection fails with an error that matches ErrAddressNotAllowed and holds an *AddressRefusal.
 func NewAddressPolicyClient(caller *http.Client, requestTimeout time.Duration, policy AddressPolicy) (*http.Client, error) {
@@ -112,6 +113,9 @@ func newAddressPolicyClient(caller *http.Client, requestTimeout time.Duration, p
 	}
 	switch transport := callerTransport.(type) {
 	case *addressPolicyTransport:
+		if transport.policy != policy {
+			copied.Transport = newAddressPolicyTransport(transport.base, policy, network)
+		}
 	case nil:
 		copied.Transport = newAddressPolicyTransport(defaultHTTPTransport(), policy, network)
 	case *http.Transport:
@@ -125,12 +129,17 @@ func newAddressPolicyClient(caller *http.Client, requestTimeout time.Duration, p
 // addressPolicyTransport sends http requests through a transport whose dialer applies the policy to plain
 // http, and https requests through one that applies it to TLS connections.
 type addressPolicyTransport struct {
+	policy AddressPolicy
+	// base is the caller's original transport, kept to rebuild the client under another policy.
+	base      *http.Transport
 	plainHTTP *http.Transport
 	secure    *http.Transport
 }
 
 func newAddressPolicyTransport(base *http.Transport, policy AddressPolicy, network addressNetwork) *addressPolicyTransport {
 	return &addressPolicyTransport{
+		policy:    policy,
+		base:      base,
 		plainHTTP: cloneWithDialer(base, policy.dialContext(network, true)),
 		secure:    cloneWithDialer(base, policy.dialContext(network, false)),
 	}
