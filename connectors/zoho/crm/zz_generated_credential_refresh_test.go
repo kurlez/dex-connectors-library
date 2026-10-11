@@ -141,8 +141,14 @@ func TestCredentialRefreshDriverCallsNoTokenEndpointForAStaticMethod(t *testing.
 				"access_token": "manifest-access-token-2", "token_type": "Bearer", "expires_in": 3600,
 			}}
 			driver := newManifestRefreshDriver(&http.Client{Transport: endpoint}, nil)
+			now := time.Now()
+			expired := now.Add(-time.Hour)
+			for _, expiresAt := range []*time.Time{nil, &expired} {
+				state := sdkgo.CredentialRefreshState[crm.Credentials]{Credentials: method.credentials, ExpiresAt: expiresAt, Now: now}
+				require.False(t, driver.RefreshRequired(state), "connector.yaml declares no grant for this method, so a host never refreshes it")
+			}
 			// Only a token request breaks the contract; whether the driver fails is its own choice.
-			_, _ = driver.Refresh(context.Background(), sdkgo.CredentialRefreshState[crm.Credentials]{Credentials: method.credentials, Now: time.Now()})
+			_, _ = driver.Refresh(context.Background(), sdkgo.CredentialRefreshState[crm.Credentials]{Credentials: method.credentials, Now: now})
 			require.Empty(t, endpoint.requests, "connector.yaml declares no grant for this method, so a host never refreshes it")
 		})
 	}

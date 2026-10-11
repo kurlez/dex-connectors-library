@@ -305,8 +305,8 @@ responses map into credentials. A method declares one of three grants:
 A method without one, such as a plain API key, keeps its credential as stored,
 so a method whose credential expires must declare its grant. `auth.refreshable`
 is true exactly when some method declares one, and a generated test fails when
-a connector's credential refresh driver calls a token endpoint for a method
-without a declaration (see
+a connector's credential refresh driver refreshes a method without a
+declaration (see
 [Credential refresh agreement](#credential-refresh-agreement)).
 
 Every grant shares these rules:
@@ -505,8 +505,10 @@ token endpoint, through the HTTP client it passes to
 - a connection without its optional client secret sends a public client
   request, or the driver refuses it with a reauthorization error.
 
-It also checks that the driver sends no token request for a method that
-declares no grant. `go test` of the connector runs it in pull requests, before
+It also checks that, for a method that declares no grant, the driver's
+`RefreshRequired` is false with no expiry and with a past one, and `Refresh`
+sends no token request, so a minting method cannot drop its declaration
+unnoticed. `go test` of the connector runs it in pull requests, before
 a release, and before a release candidate, and `connectorctl generate --check`
 fails when it is stale.
 
