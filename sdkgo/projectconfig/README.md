@@ -127,10 +127,11 @@ with `CreateCredentialBrokerToken` and updating that reference in the head, so
 applications need no restart. Without a different token the 401 is a rejection.
 
 HTTP 408, 425, 429 and every 5xx status, and any transport error, are
-`ErrCredentialBrokerUnavailable`. Any other status, including a 401 that renewal does not change, a redirect, a body that is
-not a JSON object, an unknown `status` and a `READY` answer without a credential object
-or revision are `ErrCredentialBrokerRejected`. A request ends within 40
-seconds or when the calling Step is canceled, and a response is at most 1 MiB.
+`ErrCredentialBrokerUnavailable`. Any other status (including a 401 that
+renewal does not change), a redirect, a body that is not a JSON object, an
+unknown `status` and a `READY` answer without a credential object or revision
+are `ErrCredentialBrokerRejected`. A request ends within 40 seconds or when the
+calling Step is canceled, and a response is at most 1 MiB.
 A broker that has sent a refresh to a provider must finish and store its
 result even when the client disconnects, because a lost response can leave a
 rotated token unused. Errors never contain the scope token or the response.
