@@ -42,6 +42,7 @@ func TestExternalConnectorCompatibility(t *testing.T) {
 	}
 	artifacts := make(map[string]string)
 	identities := make([]connectorDefinitionIdentity, 0, len(metadataPaths))
+	metadataByConnector := make(map[string][]byte, len(metadataPaths))
 	for _, metadataPath := range metadataPaths {
 		metadata, readErr := os.ReadFile(metadataPath)
 		if readErr != nil {
@@ -58,13 +59,14 @@ func TestExternalConnectorCompatibility(t *testing.T) {
 			ConfigurationEnabled: true,
 		}
 		identities = append(identities, identity)
+		metadataByConnector[release.ConnectorID] = metadata
 		base := filepath.Dir(metadataPath)
 		artifacts[release.Tag+"/"+connectorReleaseMetadataName] = metadataPath
 		artifacts[release.Tag+"/"+connectorReleaseDigestName] = filepath.Join(base, connectorReleaseDigestName)
 		if release.UI != nil {
 			artifacts[release.Tag+"/"+release.UI.Artifact] = filepath.Join(base, release.UI.Artifact)
 		}
-		externalValidateAuth(t, release)
+		externalValidateAuth(t, release, externalOAuthDeclarations(t, metadata))
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		path := strings.TrimPrefix(request.URL.Path, "/")
@@ -82,8 +84,9 @@ func TestExternalConnectorCompatibility(t *testing.T) {
 		if resolveErr != nil {
 			t.Fatalf("resolve %s: %v", identity.ConnectorID, resolveErr)
 		}
+		declarations := externalOAuthDeclarations(t, metadataByConnector[identity.ConnectorID])
 		if resolved.release.UI == nil {
-			externalTestOAuthStart(t, resolver, identity, resolved.release)
+			externalTestOAuthStart(t, resolver, identity, resolved.release, declarations)
 			continue
 		}
 		entrypoint := filepath.Join(resolved.uiRoot, resolved.release.UI.Entrypoint)
@@ -95,7 +98,7 @@ func TestExternalConnectorCompatibility(t *testing.T) {
 		if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Security-Policy"), "connect-src 'none'") {
 			t.Fatalf("UI response %s: status=%d CSP=%q", identity.ConnectorID, response.Code, response.Header().Get("Content-Security-Policy"))
 		}
-		externalTestOAuthStart(t, resolver, identity, resolved.release)
+		externalTestOAuthStart(t, resolver, identity, resolved.release, declarations)
 	}
 	setup := connectorTestSetup(t, t.TempDir(), connectorTestDefinitionProvider(t, identities))
 	setup.releases = resolver
@@ -106,16 +109,16 @@ func TestExternalConnectorCompatibility(t *testing.T) {
 	}
 }
 
-func externalTestOAuthStart(t *testing.T, resolver *connectorReleaseResolver, identity connectorDefinitionIdentity, release connectorRelease) {
+func externalTestOAuthStart(t *testing.T, resolver *connectorReleaseResolver, identity connectorDefinitionIdentity, release connectorRelease, declarations map[string]externalOAuthDeclaration) {
 	t.Helper()
 	for _, method := range externalAuthMethods(release.Manifest.Spec.Auth) {
 		if method.Type == "oauth2" {
-			externalTestOAuthMethodStart(t, resolver, identity, release, method)
+			externalTestOAuthMethodStart(t, resolver, identity, release, method, declarations[method.ID])
 		}
 	}
 }
 
-func externalTestOAuthMethodStart(t *testing.T, resolver *connectorReleaseResolver, identity connectorDefinitionIdentity, release connectorRelease, method connectorManifestAuthMethod) {
+func externalTestOAuthMethodStart(t *testing.T, resolver *connectorReleaseResolver, identity connectorDefinitionIdentity, release connectorRelease, method connectorManifestAuthMethod, declaration externalOAuthDeclaration) {
 	t.Helper()
 	setup := connectorTestSetup(t, t.TempDir(), connectorTestDefinitionProvider(t, []connectorDefinitionIdentity{identity}))
 	setup.releases = resolver
@@ -144,10 +147,11 @@ func externalTestOAuthMethodStart(t *testing.T, resolver *connectorReleaseResolv
 			credentialValues[field.Name] = "compatibility-value"
 		}
 	}
+	configuration := externalRequiredSettings(release, method)
 	body, err := json.Marshal(map[string]any{
 		"authMethodId": method.ID,
 		"clientId": "compatibility-client", "clientSecret": "compatibility-client-secret",
-		"configuration": map[string]any{}, "credentialValues": credentialValues, "credentialSecrets": credentialSecrets,
+		"configuration": configuration, "credentialValues": credentialValues, "credentialSecrets": credentialSecrets,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -175,8 +179,16 @@ func externalTestOAuthMethodStart(t *testing.T, resolver *connectorReleaseResolv
 		t.Fatal(err)
 	}
 	oauth := method.OAuth2
-	if authorizationURL.Scheme+"://"+authorizationURL.Host+authorizationURL.Path != oauth.AuthorizationEndpoint ||
-		authorizationURL.Query().Get("scope") != strings.Join(oauth.Scopes, " ") ||
+	wantAuthorizationEndpoint := oauth.AuthorizationEndpoint
+	if declaration.authorizationEndpointSetting != "" {
+		wantAuthorizationEndpoint = configuration[declaration.authorizationEndpointSetting].(string)
+	}
+	wantScope := strings.Join(oauth.Scopes, " ")
+	if declaration.scopesSetting != "" {
+		wantScope = strings.Join(configuration[declaration.scopesSetting].([]string), " ")
+	}
+	if authorizationURL.Scheme+"://"+authorizationURL.Host+authorizationURL.Path != wantAuthorizationEndpoint ||
+		authorizationURL.Query().Get("scope") != wantScope ||
 		authorizationURL.Query().Get("user_scope") != strings.Join(oauth.UserScopes, " ") ||
 		authorizationURL.Query().Get("state") == "" || authorizationURL.Query().Get("redirect_uri") == "" {
 		t.Fatalf("OAuth authorization URL %s: %s", identity.ConnectorID, result.AuthorizationURL)
@@ -209,7 +221,7 @@ func externalFirstOperation(metadata []byte) (string, string) {
 	panic("Connector release has no query or mutation operation")
 }
 
-func externalValidateAuth(t *testing.T, release connectorRelease) {
+func externalValidateAuth(t *testing.T, release connectorRelease, declarations map[string]externalOAuthDeclaration) {
 	t.Helper()
 	auth := release.Manifest.Spec.Auth
 	methods := externalAuthMethods(auth)
@@ -227,7 +239,11 @@ func externalValidateAuth(t *testing.T, release connectorRelease) {
 				t.Fatalf("%s %s auth has no fields", release.ConnectorID, method.Type)
 			}
 		case "oauth2":
-			if method.OAuth2 == nil || method.OAuth2.AuthorizationEndpoint == "" || method.OAuth2.TokenEndpoint == "" || len(method.OAuth2.Scopes) == 0 {
+			declaration := declarations[method.ID]
+			if method.OAuth2 == nil ||
+				(method.OAuth2.AuthorizationEndpoint == "" && declaration.authorizationEndpointSetting == "") ||
+				(method.OAuth2.TokenEndpoint == "" && declaration.tokenEndpointSetting == "") ||
+				(len(method.OAuth2.Scopes) == 0 && declaration.scopesSetting == "") {
 				t.Fatalf("%s OAuth metadata is incomplete", release.ConnectorID)
 			}
 		default:
@@ -250,4 +266,95 @@ func externalAuthMethods(auth connectorManifestAuth) []connectorManifestAuthMeth
 		Type: auth.Type, ConnectionKind: auth.ConnectionKind, Fields: auth.Fields,
 		Guide: auth.Guide, OAuth2: auth.OAuth2,
 	}}
+}
+
+// externalOAuthDeclaration names the configuration field behind each OAuth value that a release writes as
+// {"fromSetting": name}. It reads the raw metadata, so this file compiles with every Dex Web release.
+type externalOAuthDeclaration struct {
+	authorizationEndpointSetting string
+	tokenEndpointSetting         string
+	scopesSetting                string
+}
+
+// externalOAuthDeclarations returns the declarations keyed by auth method ID; a single-method manifest uses "".
+func externalOAuthDeclarations(t *testing.T, metadata []byte) map[string]externalOAuthDeclaration {
+	t.Helper()
+	type oauthDocument struct {
+		AuthorizationEndpoint json.RawMessage `json:"authorizationEndpoint"`
+		TokenEndpoint         json.RawMessage `json:"tokenEndpoint"`
+		Scopes                json.RawMessage `json:"scopes"`
+	}
+	var document struct {
+		Manifest struct {
+			Spec struct {
+				Auth struct {
+					OAuth2  *oauthDocument `json:"oauth2"`
+					Methods []struct {
+						ID     string         `json:"id"`
+						OAuth2 *oauthDocument `json:"oauth2"`
+					} `json:"methods"`
+				} `json:"auth"`
+			} `json:"spec"`
+		} `json:"manifest"`
+	}
+	if err := json.Unmarshal(metadata, &document); err != nil {
+		t.Fatal(err)
+	}
+	reference := func(raw json.RawMessage) string {
+		var setting struct {
+			FromSetting string `json:"fromSetting"`
+		}
+		if len(raw) > 0 && raw[0] == '{' {
+			if err := json.Unmarshal(raw, &setting); err != nil || setting.FromSetting == "" {
+				t.Fatalf("invalid setting reference %s", raw)
+			}
+		}
+		return setting.FromSetting
+	}
+	declare := func(oauth *oauthDocument) externalOAuthDeclaration {
+		if oauth == nil {
+			return externalOAuthDeclaration{}
+		}
+		return externalOAuthDeclaration{
+			authorizationEndpointSetting: reference(oauth.AuthorizationEndpoint),
+			tokenEndpointSetting:         reference(oauth.TokenEndpoint),
+			scopesSetting:                reference(oauth.Scopes),
+		}
+	}
+	declarations := map[string]externalOAuthDeclaration{"": declare(document.Manifest.Spec.Auth.OAuth2)}
+	for _, method := range document.Manifest.Spec.Auth.Methods {
+		declarations[method.ID] = declare(method.OAuth2)
+	}
+	return declarations
+}
+
+// externalRequiredSettings returns a sample value for every configuration field that OAuth start requires.
+func externalRequiredSettings(release connectorRelease, method connectorManifestAuthMethod) map[string]any {
+	fields := append([]connectorManifestField{}, release.Manifest.Spec.Configuration.Fields...)
+	fields = append(fields, method.configurationFields()...)
+	settings := make(map[string]any)
+	for _, field := range fields {
+		if !field.Required || field.Default != nil {
+			continue
+		}
+		switch field.Type {
+		case "url":
+			settings[field.Name] = "https://idp.compat.example/" + field.Name
+		case "stringList":
+			settings[field.Name] = []string{"compat-scope"}
+		case "integer":
+			settings[field.Name] = 1
+		case "boolean":
+			settings[field.Name] = true
+		case "duration":
+			settings[field.Name] = "1s"
+		case "enum":
+			settings[field.Name] = field.Enum[0]
+		case "stringMap":
+			settings[field.Name] = map[string]string{}
+		default:
+			settings[field.Name] = "compat-value"
+		}
+	}
+	return settings
 }
