@@ -460,8 +460,11 @@ serviceAccount:
 `tokenEndpointAuthMethod`, `tokenEndpoint` of `clientCredentials`, and every
 `jwtBearer` value except the lists name where a host finds the value. They
 share one value source type with the OAuth endpoints and `scopes` of
-[Endpoints and scopes from connection settings](#endpoints-and-scopes-from-connection-settings),
-which accept only a literal and `{fromSetting}`. Each is one of:
+[Endpoints and scopes from connection settings](#endpoints-and-scopes-from-connection-settings).
+Every `oauth2` field (the endpoints, `scopes`, `tokenEndpointAuthMethod`, the OIDC
+endpoints and the credential derivation endpoints) accepts only a literal or
+`{fromSetting}`, without `values`, because those are the forms hosts read; the
+other forms below belong to `clientCredentials` and `jwtBearer`. Each is one of:
 
 - a literal string;
 - `{fromCredential: <field>}`, a credential field of the method;

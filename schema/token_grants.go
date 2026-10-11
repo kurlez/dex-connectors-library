@@ -264,6 +264,11 @@ func (source ValueSource) MarshalJSON() ([]byte, error) {
 }
 
 // sourceCount counts the sources that are set, which a valid value source has exactly one of.
+// isLiteralOrSettingSource reports whether source is exactly a literal or a setting reference, without values.
+func isLiteralOrSettingSource(source ValueSource) bool {
+	return source.sourceCount() == 1 && len(source.Values) == 0 && (source.Value != "" || source.FromSetting != "")
+}
+
 func (source ValueSource) sourceCount() int {
 	count := 0
 	for _, isSet := range []bool{
@@ -370,6 +375,10 @@ func validateTokenGrants(prefix string, method AuthMethod, specConfigurationFiel
 
 func (grantContext tokenGrantContext) validateOAuthTokenRequests(oauth *OAuth2) []string {
 	problems := grantContext.validateTokenRequestSettings(grantContext.prefix+" oauth2", oauth.TokenEndpointAuthMethod, oauth.TokenRequestEncoding)
+	// Hosts read oauth2 fields as literals or {fromSetting} only; other sources belong to minting grants.
+	if source := oauth.TokenEndpointAuthMethod; source != nil && !isLiteralOrSettingSource(*source) {
+		problems = append(problems, grantContext.prefix+" oauth2 tokenEndpointAuthMethod must be a literal or {fromSetting}")
+	}
 	label := grantContext.prefix + " oauth2 refresh"
 	refresh := oauth.Refresh
 	if (refresh != nil || mapsSource(oauth.CredentialMappings, "refresh_token")) && oauth.ClientIDCredential == "" {

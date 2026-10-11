@@ -161,6 +161,36 @@ func TestTokenGrantDeclarationsRejectInvalidReferences(t *testing.T) {
 	}
 }
 
+func TestOAuth2FieldsTakeOnlyLiteralsOrSettings(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		edit    manifestEdit
+		problem string
+	}{
+		"a template token endpoint": {manifestEdit{
+			"          tokenEndpoint: https://login.example.com/token\n",
+			"          tokenEndpoint: {template: \"https://login.example.com/{tenantId}/token\"}\n",
+		}, "oauth2 auth requires connectionKind, endpoints, and scopes"},
+		"a translated client authentication": {manifestEdit{
+			"tokenEndpointAuthMethod: client_secret_basic",
+			"tokenEndpointAuthMethod: {fromSetting: tenantId, values: {common: client_secret_basic}}",
+		}, "oauth2 tokenEndpointAuthMethod must be a literal or {fromSetting}"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			contents := readFixture(t, "token-grants.yaml")
+			require.Contains(t, contents, testCase.edit.old)
+			_, err := schema.Decode(strings.NewReader(strings.Replace(contents, testCase.edit.old, testCase.edit.replacement, 1)))
+			require.ErrorContains(t, err, testCase.problem)
+		})
+	}
+
+	appOnly := map[string]schema.AuthMethod{}
+	for _, method := range decodeFixture(t, "token-grants.yaml").Spec.Auth.Methods {
+		appOnly[method.ID] = method
+	}
+	require.Equal(t, schema.ValueSource{Template: "https://login.example.com/{tenant_id}/token"},
+		appOnly["app-only"].ClientCredentials.TokenEndpoint, "client credentials keep templates")
+}
+
 func TestRefreshableRequiresADeclaredGrant(t *testing.T) {
 	contents := strings.Replace(readFixture(t, "google-oauth.yaml"), "  auth:\n", "  auth:\n    refreshable: true\n", 1)
 	_, err := schema.Decode(strings.NewReader(contents))
