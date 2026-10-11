@@ -318,6 +318,12 @@ hold the tokens, and checks its own required scopes. `oauthtoken` provides:
   the provider omits a replacement, as the rule above requires;
 - `IsRefreshRequired` with `RefreshSkew` and a `MissingExpiryRule` for
   providers that do or do not issue non-expiring tokens;
+- `IsRefreshRequiredWithIssueTime` and `ProportionalRefreshSkew` for a host that
+  knows when a token was issued: the skew is `min(RefreshSkew, lifetime/4)`, so a
+  60-second token is not expired on issue, and `RefreshSkew` stays the skew of a
+  token whose lifetime is unknown;
+- `ForcedRefreshFloor`, `min(60 seconds, lifetime/4)`, for a host that refuses to
+  refresh a credential again right after issuing it;
 - `HasAllScopes` and `HasExactScopes` for space- or comma-separated returned
   scopes.
 
