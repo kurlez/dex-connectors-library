@@ -163,7 +163,10 @@ A shared entry then behaves like this:
 - The entry remembers the revision it handed to each provider call. The
   provider package passes `Call.ID` through `projectconfig.ContextWithCallID`,
   and the entry keeps at most 4096 calls for 10 minutes. For a call it does not
-  remember, it assumes the cached revision.
+  remember, it assumes the cached revision. A call keeps its ID across retries,
+  so provider requests that one call sends in parallel share one record, which
+  holds the revision handed out last; a refresh between them can then cause one
+  extra forced read. This is rare and harmless.
 - `ResolveAfterRejection` serves the call that a provider rejected. If the
   cache holds another revision than the call received, because a concurrent
   read refreshed it, the call gets the cached credential without a forced read.
