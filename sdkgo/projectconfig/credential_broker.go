@@ -34,9 +34,10 @@ var (
 	// scope token) or an answer that breaks the wire contract. Retrying cannot help until the deployment is fixed.
 	ErrCredentialBrokerRejected = errors.New("credential broker rejected the request or answered invalidly")
 	// ErrRejectedCredentialNotRefreshed reports that the broker returned the credential a provider rejected, unchanged,
-	// because it was issued within the forced-refresh floor or has no refresh. Do not retry the provider call
-	// with it now; fail the call and let the caller's retry policy try again later.
-	ErrRejectedCredentialNotRefreshed = errors.New("rejected credential was not refreshed; retry later")
+	// because it was issued within the forced-refresh floor or has no refresh. Do not repeat the provider call with it.
+	// A connector that ignores this error returns the provider's rejection, as it does for a refreshed credential that
+	// is rejected again. It is never ErrReauthorizationRequired: the connection stays usable.
+	ErrRejectedCredentialNotRefreshed = errors.New("the rejected credential was not refreshed")
 )
 
 // credentialBrokerStatus is the closed set of answers to a credential read.

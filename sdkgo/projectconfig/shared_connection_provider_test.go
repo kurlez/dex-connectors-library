@@ -71,3 +71,50 @@ func TestSharedReauthorizationRequiredIsTheSDKError(t *testing.T) {
 	require.ErrorIs(t, err, sdkgo.ErrReauthorizationRequired)
 	require.True(t, sdkgo.IsReauthorizationRequired(err))
 }
+
+func TestProviderGivesTheCallIdentityToTheSharedEntry(t *testing.T) {
+	fixture := newSharedFixture(t, readyReply(1, sharedAccessOne, epoch, time.Hour))
+	ctx := context.Background()
+	refreshing, err := provider.NewRefreshingCredentialProvider(fixture.project.Connections, sharedKey, decodeToken, encodeToken)
+	require.NoError(t, err)
+	callA, callB := sharedCall, sharedCall
+	callA.ID, callB.ID = "call-a", "call-b"
+	for _, call := range []sdkgo.Call{callA, callB} {
+		value, err := sdkgo.ResolveCredential[token](ctx, refreshing, call, forbiddenSDKDriver{t})
+		require.NoError(t, err)
+		require.Equal(t, sharedAccessOne, value.Access)
+	}
+
+	fixture.broker.respondAlways(readyReply(2, "second", epoch.Add(5*time.Minute), time.Hour))
+	value, err := sdkgo.ResolveCredentialAfterRejection[token](ctx, refreshing, callB, forbiddenSDKDriver{t})
+	require.NoError(t, err)
+	require.Equal(t, "second", value.Access)
+	value, err = sdkgo.ResolveCredentialAfterRejection[token](ctx, refreshing, callA, forbiddenSDKDriver{t})
+	require.NoError(t, err)
+	require.Equal(t, "second", value.Access)
+	require.Equal(t, 2, fixture.broker.requestCount(), "call A's rejection uses the newer revision without a forced read")
+}
+
+func TestRejectedCredentialNotRefreshedIsNeverReauthorizationRequired(t *testing.T) {
+	fixture := newSharedFixture(t, readyReply(1, sharedAccessOne, epoch, time.Hour))
+	ctx := context.Background()
+	refreshing, err := provider.NewRefreshingCredentialProvider(fixture.project.Connections, sharedKey, decodeToken, encodeToken)
+	require.NoError(t, err)
+
+	_, err = sdkgo.ResolveCredentialAfterRejection[token](ctx, refreshing, sharedCall, forbiddenSDKDriver{t})
+	require.ErrorIs(t, err, projectconfig.ErrRejectedCredentialNotRefreshed)
+	require.NotErrorIs(t, err, projectconfig.ErrReauthorizationRequired)
+	require.NotErrorIs(t, err, sdkgo.ErrReauthorizationRequired)
+	require.False(t, sdkgo.IsReauthorizationRequired(err))
+
+	// The connection stays usable: the credential the provider rejected is still the cached one.
+	value, err := sdkgo.ResolveCredential[token](ctx, refreshing, sharedCall, forbiddenSDKDriver{t})
+	require.NoError(t, err)
+	require.Equal(t, sharedAccessOne, value.Access)
+
+	// A broker that reports REAUTHORIZATION_REQUIRED is the opposite case.
+	fixture.clock.Advance(time.Hour)
+	fixture.broker.respondAlways(statusReply("REAUTHORIZATION_REQUIRED"))
+	_, err = sdkgo.ResolveCredential[token](ctx, refreshing, sharedCall, forbiddenSDKDriver{t})
+	require.True(t, sdkgo.IsReauthorizationRequired(err))
+}

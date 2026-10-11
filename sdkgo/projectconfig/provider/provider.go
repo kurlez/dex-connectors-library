@@ -63,7 +63,7 @@ func (provider *CredentialProvider[C]) ResolveContext(ctx context.Context, call 
 	if err := provider.validateCall(call); err != nil {
 		return zero, err
 	}
-	value, err := provider.resolver.Resolve(ctx)
+	value, err := provider.resolver.Resolve(callContext(ctx, call))
 	return value, classifyError(err)
 }
 
@@ -77,7 +77,7 @@ func (provider *RefreshingCredentialProvider[C]) ResolveWithRefresh(ctx context.
 	if driver == nil {
 		return zero, errors.New("credential refresh driver is required")
 	}
-	value, err := provider.resolver.ResolveWithRefresh(ctx, refreshAdapter[C]{driver: driver})
+	value, err := provider.resolver.ResolveWithRefresh(callContext(ctx, call), refreshAdapter[C]{driver: driver})
 	return value, classifyError(err)
 }
 
@@ -90,8 +90,13 @@ func (provider *RefreshingCredentialProvider[C]) ResolveAfterRejection(ctx conte
 	if driver == nil {
 		return zero, errors.New("credential refresh driver is required")
 	}
-	value, err := provider.resolver.ResolveAfterRejection(ctx, refreshAdapter[C]{driver: driver})
+	value, err := provider.resolver.ResolveAfterRejection(callContext(ctx, call), refreshAdapter[C]{driver: driver})
 	return value, classifyError(err)
+}
+
+// callContext lets a shared connection remember which credential revision this call received.
+func callContext(ctx context.Context, call sdkgo.Call) context.Context {
+	return projectconfig.ContextWithCallID(ctx, string(call.ID))
 }
 
 func (provider *CredentialProvider[C]) validateCall(call sdkgo.Call) error {

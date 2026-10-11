@@ -4,6 +4,7 @@
 package projectconfig
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -54,6 +55,7 @@ func newSharedConnections(config *sharedConnectionsConfig) *sharedConnections {
 		shared.entries[key] = &sharedConnection{
 			broker: broker, configurations: config.configurations, key: key, now: config.now,
 			readSlot: make(chan struct{}, 1), sharedConnectionID: connection.SharedConnectionID,
+			issuedByCall: map[string]*list.Element{}, issuedOrder: list.New(),
 		}
 	}
 	return shared
@@ -75,11 +77,23 @@ type sharedConnection struct {
 	nextReadNotBefore time.Time
 	recentFailure     error
 	recentFailureAt   time.Time
+	// issuedByCall and issuedOrder remember the revision each provider call received, oldest call first.
+	issuedByCall map[string]*list.Element
+	issuedOrder  *list.List
 }
 
-// credential returns the cached credential, reading the broker first when it is stale. A caller that finds a stale
-// credential that has not expired never waits for a read in flight.
+// credential returns the cached credential for the call in ctx and remembers its revision for that call.
 func (connection *sharedConnection) credential(ctx context.Context) (brokerCredential, error) {
+	credential, err := connection.currentCredential(ctx)
+	if err == nil {
+		connection.recordIssued(ctx, credential.revision)
+	}
+	return credential, err
+}
+
+// currentCredential reads the broker first when the cached credential is stale. A caller that finds a stale
+// credential that has not expired never waits for a read in flight.
+func (connection *sharedConnection) currentCredential(ctx context.Context) (brokerCredential, error) {
 	if credential, isUsable := connection.usableCredential(); isUsable {
 		return credential, nil
 	}
@@ -111,26 +125,31 @@ func (connection *sharedConnection) credential(ctx context.Context) (brokerCrede
 	return credential, nil
 }
 
-// credentialAfterRejection reads again with the cached revision as rejected. An unchanged revision fails.
-// The caller does not say which revision it used, so a concurrent refresh makes this imprecise.
+// credentialAfterRejection serves a call whose credential a provider rejected. When the cache holds a different
+// revision than the call received, it returns that one without a forced read. Otherwise it reads again with the
+// rejected revision, and an unchanged revision fails the call.
 func (connection *sharedConnection) credentialAfterRejection(ctx context.Context) (brokerCredential, error) {
-	rejectedRevision := connection.cachedRevision()
+	issued := connection.issuedTo(ctx)
+	if credential, isSuperseding := connection.supersedingCredential(issued); isSuperseding {
+		connection.recordIssued(ctx, credential.revision)
+		return credential, nil
+	}
 	if err := connection.acquireReadSlot(ctx); err != nil {
 		return brokerCredential{}, err
 	}
 	defer connection.releaseReadSlot()
-	if connection.cachedRevision() != rejectedRevision {
-		if credential, isUsable := connection.usableCredential(); isUsable {
-			return credential, nil
-		}
+	if credential, isSuperseding := connection.supersedingCredential(issued); isSuperseding {
+		connection.recordIssued(ctx, credential.revision)
+		return credential, nil
 	}
-	credential, err := connection.read(ctx, rejectedRevision)
+	credential, err := connection.read(ctx, issued.revision)
 	if err != nil {
 		return brokerCredential{}, err
 	}
-	if rejectedRevision != 0 && credential.revision == rejectedRevision {
+	if issued.revision != 0 && credential.revision == issued.revision {
 		return brokerCredential{}, ErrRejectedCredentialNotRefreshed
 	}
+	connection.recordIssued(ctx, credential.revision)
 	return credential, nil
 }
 
@@ -231,15 +250,6 @@ func (connection *sharedConnection) unexpiredCredential() (brokerCredential, boo
 		return brokerCredential{}, false
 	}
 	return *connection.cached, true
-}
-
-func (connection *sharedConnection) cachedRevision() uint64 {
-	connection.mutex.Lock()
-	defer connection.mutex.Unlock()
-	if connection.cached == nil {
-		return 0
-	}
-	return connection.cached.revision
 }
 
 func (connection *sharedConnection) currentSharedConnectionID() string {

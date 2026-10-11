@@ -151,15 +151,21 @@ A shared entry then behaves like this:
   when `issuedAt` is absent), and a credential without an expiry every 15
   minutes. One read is in flight for an entry; concurrent callers wait for it
   with their own context and use its result.
-- `ResolveAfterRejection` reads again with the cached revision as
-  `rejectedRevision`. If the broker returns that revision, the credential is
-  within its forced-refresh floor or cannot be refreshed, so the call fails
-  with `ErrRejectedCredentialNotRefreshed` instead of repeating the provider
-  call with the rejected credential. A connector that maps this error to a
-  retryable failure lets the Step's retry policy try again later; one that
-  ignores it returns the provider's rejection. The SDK does not know which
-  revision a caller used, so a refresh by a concurrent caller can make this
-  comparison imprecise.
+- The entry remembers the revision it handed to each provider call. The
+  provider package passes `Call.ID` through `projectconfig.ContextWithCallID`,
+  and the entry keeps at most 4096 calls for 10 minutes. For a call it does not
+  remember, it assumes the cached revision.
+- `ResolveAfterRejection` serves the call that a provider rejected. If the
+  cache holds another revision than the call received, because a concurrent
+  read refreshed it, the call gets the cached credential without a forced read.
+  Otherwise it reads again with the call's revision as `rejectedRevision`. If
+  the broker returns that revision unchanged, the credential is within its
+  forced-refresh floor or cannot be refreshed, so the call fails with
+  `ErrRejectedCredentialNotRefreshed` instead of repeating the provider call
+  with the rejected credential. A connector that ignores the error returns the
+  provider's authentication error, as it does for a refreshed credential that
+  is rejected again. The error is never `ErrReauthorizationRequired`: the
+  connection stays usable.
 - `REAUTHORIZATION_REQUIRED` is `ErrReauthorizationRequired`, which the
   provider package reports as `sdkgo.ErrReauthorizationRequired`.
 - `CONNECTION_NOT_SELECTED` rereads the current `configuration/head` once and

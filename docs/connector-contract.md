@@ -365,9 +365,9 @@ ordinary entry's, and the same provider constructors resolve its credential
 from the document's credential broker: the provider caches it, reads again near expiry,
 and never calls the connector's refresh driver. A rejected credential that the
 broker returns unchanged makes `ResolveCredentialAfterRejection` return
-`projectconfig.ErrRejectedCredentialNotRefreshed`. A connector maps that error
-to a retryable failure so the Step's retry policy tries again later; a
-connector that ignores it returns the provider's rejection. Generated
+`projectconfig.ErrRejectedCredentialNotRefreshed`, never a reauthorization
+error. A connector that ignores it returns the provider's authentication error,
+as it does for a refreshed credential that is rejected again. Generated
 connector code does not change.
 See [Shared connections](../sdkgo/projectconfig/README.md#shared-connections).
 

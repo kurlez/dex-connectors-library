@@ -296,14 +296,15 @@ When an OAuth provider omits a new refresh token, the driver must copy the prior
 refresh token into its result.
 
 An entry that the configuration document marks with `sharedConnectionId` skips
-this path. The project provider reads its credential and settings from the
-document's credential broker, caches them, reads again when the credential is
+this path. The project provider reads its credential from the
+document's credential broker, while its settings stay in the document, caches them, reads again when the credential is
 near expiry, and never calls the driver. When a rejection read returns the
 rejected credential unchanged, `ResolveCredentialAfterRejection` returns
-`projectconfig.ErrRejectedCredentialNotRefreshed`. A connector should not repeat
-the provider call then. Mapping the error to a retryable failure lets the Step's
-retry policy try again later; a connector that ignores the error returns the
-provider's rejection. See [projectconfig](projectconfig/README.md#shared-connections).
+`projectconfig.ErrRejectedCredentialNotRefreshed`, never a reauthorization error.
+A connector should not repeat the provider call then. A connector that ignores
+the error returns the provider's authentication error, as it does for a refreshed
+credential that is rejected again. See
+[projectconfig](projectconfig/README.md#shared-connections).
 
 Hosted credential providers implement the same interface behind their trusted
 credential broker. Applications and Flow state receive only the resolved
