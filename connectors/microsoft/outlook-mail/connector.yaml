@@ -69,6 +69,9 @@ spec:
             - {credential: access_token, source: access_token}
             - {credential: refresh_token, source: refresh_token}
           pkce: true
+          refresh:
+            terminalErrorCodes: [invalid_request, invalid_grant, unauthorized_client, invalid_client, unsupported_grant_type, invalid_resource, interaction_required, consent_required, invalid_scope]
+            additionalParameters: {scope: offline_access Mail.ReadWrite Mail.Send}
       - id: app-only
         displayName: App-only access to one mailbox
         description: "For a service mailbox, such as a shared support mailbox, without a signed-in user: an Entra app authenticates with its own client ID and secret, and the connection works on the one mailbox named below. Dex requests its one-hour access tokens automatically. Limit the app to that mailbox with Exchange Online RBAC for Applications, as the guide explains."
@@ -110,6 +113,14 @@ spec:
             - "Least privilege (recommended): grant the app this one mailbox with Exchange Online RBAC for Applications, described at https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac. In Exchange Online PowerShell run New-ServicePrincipal -AppId <client_id> -ObjectId <object ID from Entra ID > Enterprise applications > the app>, New-ManagementScope -Name OutlookMailDex -RecipientRestrictionFilter \"PrimarySmtpAddress -eq 'support@contoso.com'\", then New-ManagementRoleAssignment -App <client_id> -Role \"Application Mail.ReadWrite\" -CustomResourceScope OutlookMailDex and the same with -Role \"Application Mail.Send\". Check the result with Test-ServicePrincipalAuthorization."
             - "Do not also add Microsoft Graph application permissions Mail.ReadWrite or Mail.Send under API permissions: Entra grants them for every mailbox in the tenant, and Exchange adds them to the scoped roles. If your tenant cannot use RBAC for Applications, those two application permissions with Grant admin consent also work, but they reach every mailbox; Microsoft replaced the older application access policies with RBAC for Applications."
             - "Enter mailbox and leave access_token blank: on its first Outlook call the application requests a token from https://login.microsoftonline.com/<tenant_id>/oauth2/v2.0/token with the scope https://graph.microsoft.com/.default and renews it before it expires. To revoke access, delete the client secret or remove the role assignments with Remove-ManagementRoleAssignment."
+        clientCredentials:
+          tokenEndpoint: {template: "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"}
+          clientIDCredential: client_id
+          clientSecretCredential: client_secret
+          scopes: [https://graph.microsoft.com/.default]
+          credentialMappings:
+            - {credential: access_token, source: access_token}
+          terminalErrorCodes: [invalid_request, invalid_grant, unauthorized_client, invalid_client, unsupported_grant_type, invalid_resource, interaction_required, consent_required, invalid_scope]
   studio:
     setup:
       entrypoint: index.html

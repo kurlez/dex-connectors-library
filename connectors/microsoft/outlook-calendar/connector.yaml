@@ -68,6 +68,8 @@ spec:
             - {credential: access_token, source: access_token}
             - {credential: refresh_token, source: refresh_token}
           pkce: true
+          refresh:
+            terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client, interaction_required, consent_required]
       - id: app-only
         displayName: App-only (one mailbox)
         description: "For an unattended scheduling mailbox, such as scheduling@contoso.com: an Entra application authenticates as itself with a client secret, and Dex requests its one-hour tokens with the client credentials grant. Every call addresses the one configured mailbox; an Exchange administrator should scope the app to that mailbox."
@@ -109,6 +111,14 @@ spec:
             - "Least privilege: in Exchange Online PowerShell run New-ServicePrincipal -AppId <client ID> -ObjectId <enterprise application object ID> -DisplayName <name>, New-ManagementScope -Name <scope> -RecipientRestrictionFilter \"PrimarySmtpAddress -eq 'scheduling@contoso.com'\", and New-ManagementRoleAssignment -App <client ID> -Role \"Application Calendars.ReadWrite\" -CustomResourceScope <scope>, then check it with Test-ServicePrincipalAuthorization. Do not also grant the Entra application permission, because grants combine; Exchange can take 30 minutes to 2 hours to apply the assignment."
             - "Without Exchange application RBAC, open API permissions > Add a permission > Microsoft Graph > Application permissions, add Calendars.ReadWrite, and choose Grant admin consent; that reaches every mailbox in the tenant, so prefer the scoped assignment. Application access policies are being replaced by RBAC and should not be created."
             - "Enter the tenant ID and the mailbox, and leave access_token blank: the application requests a token on its first Microsoft Graph call, and the calendar picker works once it has. To revoke access, delete the client secret or the role assignment."
+        clientCredentials:
+          tokenEndpoint: {template: "https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token"}
+          clientIDCredential: client_id
+          clientSecretCredential: client_secret
+          scopes: [https://graph.microsoft.com/.default]
+          credentialMappings:
+            - {credential: access_token, source: access_token}
+          terminalErrorCodes: [invalid_client, unauthorized_client, invalid_request, invalid_scope]
   studio:
     setup:
       entrypoint: index.html
