@@ -79,6 +79,8 @@ spec:
         discoveryEndpoint: https://www.linkedin.com/oauth/.well-known/openid-configuration
         userInfoEndpoint: https://api.linkedin.com/v2/userinfo
         nonceRequired: true
+      refresh:
+        terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client, access_denied]
   operations:
     - name: getAuthenticatedProfile
       goName: GetAuthenticatedProfile
