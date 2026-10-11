@@ -87,6 +87,10 @@ spec:
             - {credential: access_token, source: access_token}
             - {credential: refresh_token, source: refresh_token}
           pkce: true
+          tokenRequestEncoding: json
+          refresh:
+            terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client, invalid_token]
+            missingExpiry: keep
   operations:
     - name: listItems
       goName: ListItems
