@@ -79,8 +79,9 @@ refresh certain by moving the clock past the stored expiry.
   in the returned body if the API echoes them.
 - **Bounded reads.** A response is cut at `maxBodyBytes` and marked truncated.
 - **Plain http and the dialer.** The three URLs the connection owner enters may
-  use `http://`. The connector's dialer resolves each host once, checks every
-  resolved address, and connects only to an address it checked:
+  use `http://`. The connector's client is `providerhttp.PrivateNetworkHTTP`
+  from the Connector SDK: it resolves each host once, checks every resolved
+  address, and connects only to an address it checked:
   - `http` connects only when every resolved address is loopback or private
     (`127.0.0.0/8`, `::1`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
     `fc00::/7`);

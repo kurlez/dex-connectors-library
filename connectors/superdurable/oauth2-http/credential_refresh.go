@@ -42,7 +42,7 @@ func NewCredentialRefreshDriver(config Config, httpClient *http.Client) (*Creden
 	if _, err := parseHTTPURL(config.TokenEndpoint); err != nil {
 		return nil, fmt.Errorf("OAuth 2.0 HTTP tokenEndpoint: %w", err)
 	}
-	httpClient, err := newAddressPolicyClient(httpClient, config.RequestTimeout, defaultAddressPolicy())
+	httpClient, err := newPrivateNetworkHTTPClient(httpClient, config.RequestTimeout)
 	if err != nil {
 		return nil, err
 	}

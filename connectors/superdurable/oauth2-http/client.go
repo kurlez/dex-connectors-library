@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/superdurable/dex-connectors-library/sdkgo"
+	"github.com/superdurable/dex-connectors-library/sdkgo/providerhttp"
 )
 
 const (
@@ -40,9 +41,10 @@ const (
 type Option func(*clientOptions)
 
 type clientOptions struct {
-	httpClient    *http.Client
-	now           func() time.Time
-	addressPolicy addressPolicy
+	httpClient *http.Client
+	now        func() time.Time
+	// newHTTPClient builds the guarded client from the caller's; tests replace name resolution and dialing.
+	newHTTPClient func(caller *http.Client, requestTimeout time.Duration) (*http.Client, error)
 }
 
 // WithHTTPClient overrides the default HTTP client. The caller retains ownership of the client and its
@@ -85,7 +87,7 @@ func New(config Config, credentials CredentialSource, options ...Option) (*Clien
 	if credentials == nil {
 		return nil, errors.New("OAuth 2.0 HTTP credential provider is required")
 	}
-	dependencies := clientOptions{now: time.Now, addressPolicy: defaultAddressPolicy()}
+	dependencies := clientOptions{now: time.Now, newHTTPClient: newPrivateNetworkHTTPClient}
 	for _, option := range options {
 		if option == nil {
 			return nil, errors.New("OAuth 2.0 HTTP connector option is nil")
@@ -105,7 +107,7 @@ func New(config Config, credentials CredentialSource, options ...Option) (*Clien
 	if err != nil {
 		return nil, err
 	}
-	httpClient, err := newAddressPolicyClient(dependencies.httpClient, config.RequestTimeout, dependencies.addressPolicy)
+	httpClient, err := dependencies.newHTTPClient(dependencies.httpClient, config.RequestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +161,17 @@ func parseHTTPURL(value string) (*url.URL, error) {
 		return nil, errors.New("URL cannot contain user information")
 	}
 	return parsed, nil
+}
+
+// newPrivateNetworkHTTPClient connects as providerhttp.PrivateNetworkHTTP allows: plain http only to loopback
+// and private addresses, and never to link-local ones.
+func newPrivateNetworkHTTPClient(caller *http.Client, requestTimeout time.Duration) (*http.Client, error) {
+	return providerhttp.NewAddressPolicyClient(caller, requestTimeout, providerhttp.PrivateNetworkHTTP)
+}
+
+// describeRefusal returns the failure text for a refused connection of target, such as "apiBaseUrl".
+func describeRefusal(target string, refusal *providerhttp.AddressRefusal) string {
+	return fmt.Sprintf("the connection's %s resolves to an address the connector will not connect to: %s", target, refusal.Reason)
 }
 
 func sendRequestFailure(kind sdkgo.FailureKind, message string) sdkgo.Failure {

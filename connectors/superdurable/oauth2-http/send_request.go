@@ -116,7 +116,7 @@ func (operation SendRequestOperation) Invoke(call sdkgo.Call, input SendRequestI
 func (operation SendRequestOperation) credentialFailure(
 	ctx context.Context, err error, credentials Credentials,
 ) (sdkgo.MutationAttempt[SendRequestOutput], bool) {
-	var refusal *addressRefusal
+	var refusal *providerhttp.AddressRefusal
 	switch {
 	case errors.As(err, &refusal):
 		return sendRequestBranch(SendRequestBranchDefect, SendRequestOutput{}, sdkgo.FailureValidation,
@@ -145,7 +145,7 @@ type httpExchange struct {
 	err          error
 	isDispatched bool
 	// refusal is set when the address policy refused the connection, so no request was sent.
-	refusal *addressRefusal
+	refusal *providerhttp.AddressRefusal
 }
 
 // exchange sends the planned request once with credentials' access token. It reads at most maxBodyBytes+1
@@ -177,7 +177,7 @@ func (client *Client) exchange(ctx context.Context, call sdkgo.Call, request pla
 	}
 	response, err := client.httpClient.Do(httpRequest)
 	if err != nil {
-		var refusal *addressRefusal
+		var refusal *providerhttp.AddressRefusal
 		if errors.As(err, &refusal) {
 			return httpExchange{err: errors.New("the connection was refused"), refusal: refusal}
 		}

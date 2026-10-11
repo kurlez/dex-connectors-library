@@ -6,7 +6,11 @@ package oauth2http
 import (
 	"context"
 	"net"
+	"net/http"
 	"net/netip"
+	"time"
+
+	"github.com/superdurable/dex-connectors-library/sdkgo/providerhttp"
 )
 
 // WithAddressResolutionForTest replaces DNS resolution and the TCP dial of the address policy, so a test
@@ -16,6 +20,8 @@ func WithAddressResolutionForTest(
 	dial func(ctx context.Context, network string, address string) (net.Conn, error),
 ) Option {
 	return func(options *clientOptions) {
-		options.addressPolicy = addressPolicy{lookupAddresses: resolve, dial: dial}
+		options.newHTTPClient = func(caller *http.Client, requestTimeout time.Duration) (*http.Client, error) {
+			return providerhttp.NewAddressPolicyClientForTest(caller, requestTimeout, providerhttp.PrivateNetworkHTTP, resolve, dial)
+		}
 	}
 }
