@@ -69,6 +69,9 @@ spec:
         - {credential: access_token, source: access_token}
         - {credential: refresh_token, source: refresh_token}
       pkce: true
+      tokenEndpointAuthMethod: client_secret_basic
+      refresh:
+        terminalErrorCodes: [invalid_request, invalid_client, invalid_grant, unauthorized_client]
   operations:
     - name: listMeetings
       goName: ListMeetings
