@@ -95,6 +95,9 @@ spec:
         - {credential: access_token, source: access_token}
         - {credential: refresh_token, source: refresh_token}
       pkce: true
+      tokenEndpointAuthMethod: {fromSetting: tokenEndpointAuthMethod}
+      refresh:
+        terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
   operations:
     - name: sendRequest
       goName: SendRequest

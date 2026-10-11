@@ -25,3 +25,14 @@ func WithAddressResolutionForTest(
 		}
 	}
 }
+
+// NewCredentialRefreshDriverThroughTransportForTest builds the refresh driver for config but sends its token
+// requests through transport instead of the address policy, which can dial only a network address.
+func NewCredentialRefreshDriverThroughTransportForTest(config Config, transport http.RoundTripper) (*CredentialRefreshDriver, error) {
+	driver, err := NewCredentialRefreshDriver(config, nil)
+	if err != nil {
+		return nil, err
+	}
+	driver.httpClient = providerhttp.NewProviderHTTPClient(&http.Client{Transport: transport}, withConfigDefaults(config).RequestTimeout)
+	return driver, nil
+}
