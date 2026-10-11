@@ -272,6 +272,47 @@ func TestExchangeValidatesEndpointBeforeCallingProvider(t *testing.T) {
 	}
 }
 
+func TestExchangeAcceptsPlainHTTPOnlyWhenDeclared(t *testing.T) {
+	const plainHTTPEndpointURL = "http://identity.internal:8080/realms/app/protocol/openid-connect/token"
+	client := ClientCredentials{ID: "client-id", Secret: sdkgo.NewSecretString("client-secret"), AuthenticationMethod: ClientSecretPost}
+	for _, test := range []struct {
+		name            string
+		allowsPlainHTTP bool
+		url             string
+		isAccepted      bool
+		expectedError   string
+	}{
+		{name: "plain HTTP is refused by default", url: plainHTTPEndpointURL, expectedError: "URL must be absolute HTTPS with a host"},
+		{name: "plain HTTP is accepted when declared", url: plainHTTPEndpointURL, allowsPlainHTTP: true, isAccepted: true},
+		{name: "HTTPS is still accepted when plain HTTP is declared", url: testTokenEndpointURL, allowsPlainHTTP: true, isAccepted: true},
+		{name: "another scheme is refused", url: "ftp://identity.internal/token", allowsPlainHTTP: true, expectedError: "URL must be absolute HTTP or HTTPS with a host"},
+		{name: "user information is refused", url: "http://user:password@identity.internal/token", allowsPlainHTTP: true, expectedError: "URL cannot contain user information"},
+		{name: "a missing host is refused", url: "http:///token", allowsPlainHTTP: true, expectedError: "URL must be absolute HTTP or HTTPS with a host"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			requestCount := 0
+			endpoint := testTokenEndpoint(func(request *http.Request) (*http.Response, error) {
+				requestCount++
+				require.Equal(t, test.url, request.URL.String())
+				return tokenHTTPResponse(t, http.StatusOK, successfulTokenBody()), nil
+			})
+			endpoint.URL = test.url
+			endpoint.AllowsPlainHTTP = test.allowsPlainHTTP
+
+			token, err := endpoint.ExchangeRefreshToken(context.Background(), client, sdkgo.NewSecretString("refresh-token"))
+
+			if test.isAccepted {
+				require.NoError(t, err)
+				require.Equal(t, "new-access", token.AccessToken.Reveal())
+				require.Equal(t, 1, requestCount)
+				return
+			}
+			require.EqualError(t, err, "Example token endpoint is invalid: "+test.expectedError)
+			require.Zero(t, requestCount, "a refused endpoint must not call the provider")
+		})
+	}
+}
+
 func TestExchangeDoesNotFollowRedirects(t *testing.T) {
 	requestCount := 0
 	endpoint := testTokenEndpoint(func(request *http.Request) (*http.Response, error) {

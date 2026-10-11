@@ -83,7 +83,8 @@ type ClientCredentials struct {
 type TokenEndpoint struct {
 	// ProviderName begins every error message, such as "Google" or "GitHub".
 	ProviderName string
-	// URL is the absolute HTTPS token endpoint without user information.
+	// URL is the absolute token endpoint without user information. It must use
+	// HTTPS unless AllowsPlainHTTP is set.
 	URL string
 	// HTTPClient performs the exchange. The endpoint uses a copy that never
 	// follows redirects, so client secrets and assertions reach only URL. The
@@ -114,6 +115,12 @@ type TokenEndpoint struct {
 	// form encoding, for providers such as Atlassian and Zendesk that document
 	// only JSON token requests.
 	UsesJSONRequestBody bool
+	// AllowsPlainHTTP also accepts an http:// URL. The refresh token and the
+	// client secret then cross the network unencrypted, so set it only when the
+	// URL comes from a connection setting whose owner accepted that, such as an
+	// identity provider on a private network. A connector with a fixed provider
+	// URL never sets it.
+	AllowsPlainHTTP bool
 	// AdditionalRequestParameters are fixed, non-secret parameters added to every
 	// grant, such as a requested lifetime. They cannot replace a grant, client,
 	// or assertion parameter.
@@ -256,7 +263,7 @@ func (endpoint TokenEndpoint) exchange(
 	if endpoint.HTTPClient == nil {
 		return TokenResponse{}, fmt.Errorf("%s token endpoint has no HTTP client", endpoint.ProviderName)
 	}
-	if err := validateTokenEndpointURL(endpoint.URL); err != nil {
+	if err := validateTokenEndpointURL(endpoint.URL, endpoint.AllowsPlainHTTP); err != nil {
 		return TokenResponse{}, fmt.Errorf("%s token endpoint is invalid: %w", endpoint.ProviderName, err)
 	}
 	for _, fieldName := range endpoint.RetainedResponseFields {
@@ -399,13 +406,18 @@ func (endpoint TokenEndpoint) isAcceptedTokenType(tokenType string) bool {
 
 // validateTokenEndpointURL requires an absolute HTTPS URL with a host and no
 // user information, so a client secret or assertion is never sent in the clear.
-// Error messages never repeat the value.
-func validateTokenEndpointURL(value string) error {
+// With allowsPlainHTTP the scheme may also be http. Error messages never repeat
+// the value.
+func validateTokenEndpointURL(value string, allowsPlainHTTP bool) error {
 	parsed, err := url.Parse(value)
 	if err != nil {
 		return errors.New("URL cannot be parsed")
 	}
-	if parsed.Scheme != "https" || parsed.Hostname() == "" {
+	hasAllowedScheme := parsed.Scheme == "https" || (allowsPlainHTTP && parsed.Scheme == "http")
+	if !hasAllowedScheme || parsed.Hostname() == "" {
+		if allowsPlainHTTP {
+			return errors.New("URL must be absolute HTTP or HTTPS with a host")
+		}
 		return errors.New("URL must be absolute HTTPS with a host")
 	}
 	if parsed.User != nil {

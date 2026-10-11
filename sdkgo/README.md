@@ -321,18 +321,23 @@ hold the tokens, and checks its own required scopes. `oauthtoken` provides:
 - `HasAllScopes` and `HasExactScopes` for space- or comma-separated returned
   scopes.
 
-Each exchange accepts only an absolute HTTPS endpoint, never follows a
-redirect, reads at most 1 MiB, and requires an access token, a positive
-lifetime, and an accepted `token_type` compared without case. Missing refresh
-material and the connector's declared `TerminalErrorCodes` return an error
-wrapped by `NewReauthorizationRequiredError` on any status below 500, because
-providers report grant errors with 200, 400, or 403. A 5xx response is always
-retryable, even with a terminal code, because some providers report
-`invalid_grant` during outages. Errors repeat only a declared terminal code,
+Each exchange accepts only an absolute HTTPS endpoint unless the connector sets
+`AllowsPlainHTTP`, never follows a redirect, reads at most 1 MiB, and requires
+an access token, a positive lifetime, and an accepted `token_type` compared
+without case. Missing refresh material and the connector's declared
+`TerminalErrorCodes` return an error wrapped by
+`NewReauthorizationRequiredError` on any status below 500, because providers
+report grant errors with 200, 400, or 403. A 5xx response is always retryable,
+even with a terminal code, because some providers report `invalid_grant` during
+outages. Errors repeat only a declared terminal code,
 never provider descriptions, secrets, or undeclared codes.
 
 A `TokenEndpoint` also declares the provider differences its connector needs:
 
+- `AllowsPlainHTTP` for a token endpoint that a connection setting supplies and
+  whose owner may run it over plain HTTP, such as an identity provider on a
+  private network. The refresh token and client secret then travel unencrypted,
+  so a connector with a fixed provider URL never sets it;
 - `AcceptsMissingTokenType` and `AcceptedTokenTypes` for providers that omit
   `token_type` or return a value other than Bearer;
 - `AcceptsMissingExpiresIn` for providers such as Salesforce whose response has
