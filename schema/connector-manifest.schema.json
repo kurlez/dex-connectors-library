@@ -451,8 +451,11 @@
       ]
     },
     "tokenEndpointAuthMethod": {
-      "description": "How token requests present the client; client_secret_post when absent. A connection without a client secret sends only client_id.",
-      "enum": ["client_secret_post", "client_secret_basic"]
+      "description": "How token requests present the client; client_secret_post when absent. A value source, such as {fromSetting: <enum setting>}, resolves to one of the two methods. A connection without a client secret sends only client_id.",
+      "oneOf": [
+        { "enum": ["client_secret_post", "client_secret_basic"] },
+        { "allOf": [{ "$ref": "#/$defs/valueSource" }, { "type": "object", "not": { "required": ["template"] } }] }
+      ]
     },
     "tokenRequestEncoding": {
       "description": "The token request body; form when absent.",

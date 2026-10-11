@@ -179,9 +179,10 @@ type OAuth2 struct {
 	PKCE                    bool                        `yaml:"pkce" json:"pkce"`
 	Protocol                string                      `yaml:"protocol,omitempty" json:"protocol,omitempty"`
 	OIDC                    *OIDC                       `yaml:"oidc,omitempty" json:"oidc,omitempty"`
-	// TokenEndpointAuthMethod is how token requests present the client: client_secret_post when empty, or
-	// client_secret_basic. A connection without a client secret sends only client_id, as a public client.
-	TokenEndpointAuthMethod string `yaml:"tokenEndpointAuthMethod,omitempty" json:"tokenEndpointAuthMethod,omitempty"`
+	// TokenEndpointAuthMethod is how token requests present the client: client_secret_post when nil, or a value
+	// source that resolves to client_secret_post or client_secret_basic. A connection without a client secret
+	// sends only client_id, as a public client.
+	TokenEndpointAuthMethod *ValueSource `yaml:"tokenEndpointAuthMethod,omitempty" json:"tokenEndpointAuthMethod,omitempty"`
 	// TokenRequestEncoding is the token request body: form when empty, or json.
 	TokenRequestEncoding string `yaml:"tokenRequestEncoding,omitempty" json:"tokenRequestEncoding,omitempty"`
 	// Refresh declares how a host refreshes the access token with the stored refresh token. Its defaults apply when

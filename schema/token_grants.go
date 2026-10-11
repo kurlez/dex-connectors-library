@@ -75,8 +75,9 @@ type ClientCredentialsGrant struct {
 	// TokenEndpoint is the HTTPS token endpoint: a URL, or a value source such as a template that names a
 	// credential field or setting.
 	TokenEndpoint ValueSource `yaml:"tokenEndpoint" json:"tokenEndpoint"`
-	// TokenEndpointAuthMethod is client_secret_post when empty, or client_secret_basic.
-	TokenEndpointAuthMethod string `yaml:"tokenEndpointAuthMethod,omitempty" json:"tokenEndpointAuthMethod,omitempty"`
+	// TokenEndpointAuthMethod is client_secret_post when nil, or a value source that resolves to
+	// client_secret_post or client_secret_basic.
+	TokenEndpointAuthMethod *ValueSource `yaml:"tokenEndpointAuthMethod,omitempty" json:"tokenEndpointAuthMethod,omitempty"`
 	// TokenRequestEncoding is form when empty, or json.
 	TokenRequestEncoding string `yaml:"tokenRequestEncoding,omitempty" json:"tokenRequestEncoding,omitempty"`
 	// ClientIDCredential is the non-secret credential field that holds the client ID.
@@ -398,13 +399,45 @@ func (grantContext tokenGrantContext) validateJWTBearer(grant *JWTBearerGrant) [
 	return problems
 }
 
-func (grantContext tokenGrantContext) validateTokenRequestSettings(label, authMethod, encoding string) []string {
-	var problems []string
-	if authMethod != "" && authMethod != ClientSecretPostAuthMethod && authMethod != ClientSecretBasicAuthMethod {
-		problems = append(problems, label+" tokenEndpointAuthMethod must be client_secret_post or client_secret_basic")
-	}
+func (grantContext tokenGrantContext) validateTokenRequestSettings(label string, authMethod *ValueSource, encoding string) []string {
+	problems := grantContext.validateClientAuthentication(label+" tokenEndpointAuthMethod", authMethod)
 	if encoding != "" && encoding != FormTokenRequestEncoding && encoding != JSONTokenRequestEncoding {
 		problems = append(problems, label+" tokenRequestEncoding must be form or json")
+	}
+	return problems
+}
+
+// validateClientAuthentication requires every value the source can resolve to to be a supported method: a
+// literal, the translated values, or the enum values of the field or setting it names.
+func (grantContext tokenGrantContext) validateClientAuthentication(label string, source *ValueSource) []string {
+	if source == nil {
+		return nil
+	}
+	problems := grantContext.validateValueSource(label, *source, false)
+	var values []string
+	switch {
+	case source.Template != "":
+		return append(problems, label+" cannot be a template")
+	case source.Value != "":
+		values = []string{source.Value}
+	case len(source.Values) > 0:
+		for _, value := range source.Values {
+			values = append(values, value)
+		}
+	default:
+		field, found := grantContext.credentials[source.FromCredential]
+		if source.FromSetting != "" {
+			field, found = grantContext.settings[source.FromSetting]
+		}
+		if !found || field.Type != "enum" {
+			return append(problems, label+" must name an enum field or translate its value with values")
+		}
+		values = field.Enum
+	}
+	for _, value := range values {
+		if value != ClientSecretPostAuthMethod && value != ClientSecretBasicAuthMethod {
+			return append(problems, label+" must be client_secret_post or client_secret_basic")
+		}
 	}
 	return problems
 }

@@ -340,7 +340,11 @@ refresh. Two optional fields shape both requests:
   default, sends `client_id` and `client_secret` in the body;
   `client_secret_basic` sends them as HTTP Basic credentials. A connection
   without a client secret, which only a method with an optional client secret
-  field can have, sends only `client_id`, as a PKCE public client.
+  field can have, sends only `client_id`, as a PKCE public client. A connector
+  whose connection owner chooses the method declares a
+  [value source](#value-sources) instead, such as
+  `{fromSetting: tokenEndpointAuthMethod}` naming an `enum` setting whose
+  values are the two methods.
 - `tokenRequestEncoding` is `form`, the default, or `json` for providers that
   document only JSON token requests.
 
@@ -453,8 +457,9 @@ serviceAccount:
 
 ### Value sources
 
-`tokenEndpoint` of `clientCredentials` and every `jwtBearer` value except the
-lists name where a host finds the value. Each is one of:
+`tokenEndpointAuthMethod`, `tokenEndpoint` of `clientCredentials`, and every
+`jwtBearer` value except the lists name where a host finds the value. Each is
+one of:
 
 - a literal string;
 - `{fromCredential: <field>}`, a credential field of the method;
@@ -476,7 +481,10 @@ audience:
   values: {"": https://login.example.com, production: https://login.example.com, sandbox: https://test.example.com}
 ```
 
-A literal or translated token endpoint is an absolute HTTPS URL. A host checks
+A `tokenEndpointAuthMethod` source is not a template, and every value it can
+resolve to, a literal, a translation, or the values of the `enum` field or
+setting it names, is `client_secret_post` or `client_secret_basic`. A literal
+or translated token endpoint is an absolute HTTPS URL. A host checks
 an endpoint that it reads from a credential, setting, or key before it sends a
 secret there. Release metadata writes a literal as a JSON string, every other
 source as an object, and `missingExpiry` as `"keep"` or `{"lifetime": "2h"}`.

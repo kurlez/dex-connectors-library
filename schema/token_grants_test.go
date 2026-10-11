@@ -20,7 +20,7 @@ func TestDecodeTokenGrantDeclarations(t *testing.T) {
 	}
 
 	userOAuth := methods["user-oauth"].OAuth2
-	require.Equal(t, schema.ClientSecretBasicAuthMethod, userOAuth.TokenEndpointAuthMethod)
+	require.Equal(t, &schema.ValueSource{Value: schema.ClientSecretBasicAuthMethod}, userOAuth.TokenEndpointAuthMethod)
 	require.Equal(t, schema.JSONTokenRequestEncoding, userOAuth.TokenRequestEncoding)
 	require.Equal(t, &schema.OAuthRefresh{
 		TerminalErrorCodes:   []string{"invalid_grant", "invalid_client"},
@@ -85,6 +85,12 @@ func TestTokenGrantDeclarationsRejectInvalidReferences(t *testing.T) {
 		"an unknown client authentication": {edits: []manifestEdit{
 			{"tokenEndpointAuthMethod: client_secret_basic", "tokenEndpointAuthMethod: private_key_jwt"},
 		}, problem: "tokenEndpointAuthMethod must be client_secret_post or client_secret_basic"},
+		"a client authentication setting with other values": {edits: []manifestEdit{
+			{"tokenEndpointAuthMethod: client_secret_basic", "tokenEndpointAuthMethod: {fromSetting: tenantId}"},
+		}, problem: "tokenEndpointAuthMethod must name an enum field or translate its value with values"},
+		"a client authentication template": {edits: []manifestEdit{
+			{"tokenEndpointAuthMethod: client_secret_basic", `tokenEndpointAuthMethod: {template: "https://example.com/{tenantId}/x"}`},
+		}, problem: "tokenEndpointAuthMethod cannot be a template"},
 		"an unknown request encoding": {edits: []manifestEdit{
 			{"tokenRequestEncoding: json", "tokenRequestEncoding: xml"},
 		}, problem: "tokenRequestEncoding must be form or json"},
@@ -153,4 +159,15 @@ func TestRefreshableRequiresADeclaredGrant(t *testing.T) {
 	contents := strings.Replace(readFixture(t, "google-oauth.yaml"), "  auth:\n", "  auth:\n    refreshable: true\n", 1)
 	_, err := schema.Decode(strings.NewReader(contents))
 	require.ErrorContains(t, err, "spec.auth.refreshable requires a method that maps a refresh token or declares clientCredentials or serviceAccount.jwtBearer")
+}
+
+func TestClientAuthenticationFromAnEnumSetting(t *testing.T) {
+	manifest := decodeEditedFixture(t, "token-grants.yaml",
+		manifestEdit{"      - {name: tenantId,", "      - {name: clientAuthentication, goName: ClientAuthentication, type: enum, enum: [client_secret_post, client_secret_basic], description: Token endpoint client authentication., required: false}\n      - {name: tenantId,"},
+		manifestEdit{"tokenEndpointAuthMethod: client_secret_basic", "tokenEndpointAuthMethod: {fromSetting: clientAuthentication}"})
+	oauth := manifest.Spec.Auth.Methods[0].OAuth2
+	require.Equal(t, &schema.ValueSource{FromSetting: "clientAuthentication"}, oauth.TokenEndpointAuthMethod)
+	encoded, err := json.Marshal(oauth.TokenEndpointAuthMethod)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"fromSetting": "clientAuthentication"}`, string(encoded))
 }

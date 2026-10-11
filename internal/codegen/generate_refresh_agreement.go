@@ -52,7 +52,7 @@ type declaredGrant struct {
 	method       schema.AuthMethod
 	kind         string
 	endpoint     schema.ValueSource
-	authMethod   string
+	authMethod   schema.ValueSource
 	encoding     string
 	clientID     string
 	clientSecret string
@@ -179,7 +179,7 @@ func declaredGrants(manifest schema.Manifest) []declaredGrant {
 				}
 				grants = append(grants, declaredGrant{
 					name: name, methodLabel: label, method: method, kind: "refresh", endpoint: schema.ValueSource{Value: oauth.TokenEndpoint.URL},
-					authMethod: defaultString(oauth.TokenEndpointAuthMethod, schema.ClientSecretPostAuthMethod), encoding: defaultString(oauth.TokenRequestEncoding, schema.FormTokenRequestEncoding),
+					authMethod: clientAuthentication(oauth.TokenEndpointAuthMethod), encoding: defaultString(oauth.TokenRequestEncoding, schema.FormTokenRequestEncoding),
 					clientID: oauth.ClientIDCredential, clientSecret: oauth.ClientSecretCredential, refreshToken: refreshGrant.RefreshTokenCredential,
 					mappings: refreshGrant.CredentialMappings, responseScopes: withoutString(responseScopes, offlineAccessScope),
 					terminalCodes: defaultStrings(refresh.TerminalErrorCodes, "invalid_grant"), missingExpiry: refresh.MissingExpiry, additional: refresh.AdditionalParameters,
@@ -189,7 +189,7 @@ func declaredGrants(manifest schema.Manifest) []declaredGrant {
 		if clientCredentials := method.ClientCredentials; clientCredentials != nil {
 			grants = append(grants, declaredGrant{
 				name: label + " clientCredentials", methodLabel: label, method: method, kind: "clientCredentials", endpoint: clientCredentials.TokenEndpoint,
-				authMethod: defaultString(clientCredentials.TokenEndpointAuthMethod, schema.ClientSecretPostAuthMethod), encoding: defaultString(clientCredentials.TokenRequestEncoding, schema.FormTokenRequestEncoding),
+				authMethod: clientAuthentication(clientCredentials.TokenEndpointAuthMethod), encoding: defaultString(clientCredentials.TokenRequestEncoding, schema.FormTokenRequestEncoding),
 				clientID: clientCredentials.ClientIDCredential, clientSecret: clientCredentials.ClientSecretCredential, mappings: clientCredentials.CredentialMappings,
 				requestScopes: clientCredentials.Scopes, responseScopes: clientCredentials.Scopes,
 				terminalCodes: defaultStrings(clientCredentials.TerminalErrorCodes, "invalid_client"), missingExpiry: clientCredentials.MissingExpiry, additional: clientCredentials.AdditionalParameters,
@@ -211,7 +211,7 @@ func declaredGrants(manifest schema.Manifest) []declaredGrant {
 // variants returns one variant for each value that a values map translates, or one variant without a fixed value.
 func (agreement *refreshAgreementGenerator) variants(grant declaredGrant) []grantVariant {
 	var translated []schema.ValueSource
-	translated = append(translated, grant.endpoint)
+	translated = append(translated, grant.endpoint, grant.authMethod)
 	if grant.jwtBearer != nil {
 		translated = append(translated, grant.jwtBearer.Issuer, grant.jwtBearer.Audience)
 		if grant.jwtBearer.Subject != nil {
@@ -227,6 +227,14 @@ func (agreement *refreshAgreementGenerator) variants(grant declaredGrant) []gran
 		field = sourceField(source)
 		for key := range source.Values {
 			keys[key] = true
+		}
+	}
+	if field == "" && len(grant.authMethod.Values) == 0 {
+		if enumField, isEnum := agreement.enumField(grant.method, sourceField(grant.authMethod)); isEnum {
+			field = enumField.Name
+			for _, value := range enumField.Enum {
+				keys[value] = true
+			}
 		}
 	}
 	if field == "" {
@@ -265,7 +273,12 @@ func (agreement *refreshAgreementGenerator) writeGrantCase(generation *generator
 	for parameter, value := range grant.additional {
 		parameters[parameter] = value
 	}
-	clientAuth := grant.authMethod
+	clientAuth := "none"
+	if grant.kind != "jwtBearer" {
+		if clientAuth, err = resolve(grant.authMethod); err != nil {
+			return fmt.Errorf("%s tokenEndpointAuthMethod: %w", name, err)
+		}
+	}
 	switch grant.kind {
 	case "refresh":
 		parameters["grant_type"] = "refresh_token"
@@ -280,7 +293,6 @@ func (agreement *refreshAgreementGenerator) writeGrantCase(generation *generator
 		}
 	case "jwtBearer":
 		parameters["grant_type"] = "urn:ietf:params:oauth:grant-type:jwt-bearer"
-		clientAuth = "none"
 	}
 	response, updates := agreement.sampleResponse(grant, credentials, sample)
 
@@ -453,8 +465,12 @@ func (agreement *refreshAgreementGenerator) sampleCredentials(grant declaredGran
 func (agreement *refreshAgreementGenerator) sampleSettings(grant declaredGrant, variant grantVariant, sample RefreshAgreementSample) map[string]string {
 	settings := map[string]string{}
 	for _, source := range agreement.sources(grant) {
-		if source.FromSetting != "" {
-			settings[source.FromSetting] = "manifest-" + source.FromSetting
+		if source.FromSetting == "" {
+			continue
+		}
+		settings[source.FromSetting] = "manifest-" + source.FromSetting
+		if enumField, isEnum := agreement.enumField(grant.method, source.FromSetting); isEnum {
+			settings[source.FromSetting] = enumField.Enum[0]
 		}
 	}
 	for _, placeholder := range agreement.templatePlaceholders(grant) {
@@ -530,7 +546,7 @@ func (agreement *refreshAgreementGenerator) sampleResponse(grant declaredGrant, 
 }
 
 func (agreement *refreshAgreementGenerator) sources(grant declaredGrant) []schema.ValueSource {
-	sources := []schema.ValueSource{grant.endpoint}
+	sources := []schema.ValueSource{grant.endpoint, grant.authMethod}
 	if jwtBearer := grant.jwtBearer; jwtBearer != nil {
 		sources = append(sources, jwtBearer.PrivateKey, jwtBearer.Issuer, jwtBearer.Audience, jwtBearer.TokenEndpoint)
 		if jwtBearer.Subject != nil {
@@ -559,6 +575,20 @@ func (agreement *refreshAgreementGenerator) readsSettings(grants []declaredGrant
 		}
 	}
 	return false
+}
+
+// enumField returns the enum credential field or setting of method that name names.
+func (agreement *refreshAgreementGenerator) enumField(method schema.AuthMethod, name string) (schema.Field, bool) {
+	fields := append(append([]schema.Field{}, method.Fields...), agreement.manifest.Spec.Configuration.Fields...)
+	if method.Configuration != nil {
+		fields = append(fields, method.Configuration.Fields...)
+	}
+	for _, field := range fields {
+		if field.Name == name && field.Type == "enum" && len(field.Enum) > 0 {
+			return field, true
+		}
+	}
+	return schema.Field{}, false
 }
 
 func (agreement *refreshAgreementGenerator) isMethodCredential(method schema.AuthMethod, name string) bool {
@@ -734,6 +764,14 @@ func typedFieldExpression(connector string, field schema.Field, expression strin
 	default:
 		return expression
 	}
+}
+
+// clientAuthentication returns the declared token endpoint client authentication, client_secret_post by default.
+func clientAuthentication(source *schema.ValueSource) schema.ValueSource {
+	if source == nil {
+		return schema.ValueSource{Value: schema.ClientSecretPostAuthMethod}
+	}
+	return *source
 }
 
 func defaultString(value, fallback string) string {

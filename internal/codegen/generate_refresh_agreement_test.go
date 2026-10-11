@@ -6,6 +6,7 @@ package codegen_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -60,6 +61,27 @@ func TestGenerateRefreshAgreementTestAppliesSamplesFromGeneralToSpecific(t *test
 	require.Contains(t, text, `"instance_url": "https://general.example.com"`, "the general sample applies to the other methods")
 	require.Contains(t, text, `"https://stored.example.com"`)
 	require.Contains(t, text, `"token_type": "user"`)
+}
+
+func TestGenerateRefreshAgreementTestCoversEveryClientAuthenticationOfASetting(t *testing.T) {
+	fixture, err := os.ReadFile("../../schema/testdata/token-grants.yaml")
+	require.NoError(t, err)
+	contents := strings.Replace(string(fixture), "      - {name: tenantId,", "      - {name: clientAuthentication, goName: ClientAuthentication, type: enum, enum: [client_secret_post, client_secret_basic], description: Client authentication., required: false}\n      - {name: tenantId,", 1)
+	contents = strings.Replace(contents, "tokenEndpointAuthMethod: client_secret_basic", "tokenEndpointAuthMethod: {fromSetting: clientAuthentication}", 1)
+	manifest, err := schema.Decode(strings.NewReader(contents))
+	require.NoError(t, err)
+	generated, err := codegen.GenerateRefreshAgreementTest(manifest, "example.com/tokengrants", nil)
+	require.NoError(t, err)
+	text := string(generated)
+	for _, expected := range []string{
+		"return newCredentialRefreshDriverWithSettings(httpClient, settings)",
+		`name:     "user-oauth refresh with clientAuthentication \"client_secret_basic\"",`,
+		`name:     "user-oauth refresh with clientAuthentication \"client_secret_post\"",`,
+		`settings:           map[string]string{"clientAuthentication": "client_secret_basic"},`,
+		`clientAuth:         "client_secret_post",`,
+	} {
+		require.Contains(t, text, expected)
+	}
 }
 
 func generateTokenGrantsAgreement(t *testing.T, samples map[string]codegen.RefreshAgreementSample) []byte {
