@@ -82,6 +82,14 @@ spec:
         - {credential: refresh_token, source: refresh_token}
         - {credential: id_token, source: id_token}
       pkce: false
+      tokenEndpointAuthMethod: client_secret_basic
+      refresh:
+        terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client, unsupported_grant_type]
+        grants:
+          - refreshTokenCredential: refresh_token
+            credentialMappings:
+              - {credential: access_token, source: access_token}
+              - {credential: refresh_token, source: refresh_token}
   operations:
     - name: findCustomer
       goName: FindCustomer
