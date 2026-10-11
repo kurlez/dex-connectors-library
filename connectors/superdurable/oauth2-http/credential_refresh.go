@@ -34,19 +34,21 @@ type CredentialRefreshDriver struct {
 
 // NewCredentialRefreshDriver constructs the refresh driver for config's token endpoint and client
 // authentication method. A nil HTTP client uses a client with the connection's requestTimeout; the caller
-// keeps ownership of a supplied client. It fails when the token endpoint is not an absolute http or
-// https URL without user information.
+// keeps ownership of a supplied client, whose transport must be nil or an *http.Transport. The driver
+// connects as WithHTTPClient describes. It fails when the token endpoint is not an absolute http or https
+// URL without user information.
 func NewCredentialRefreshDriver(config Config, httpClient *http.Client) (*CredentialRefreshDriver, error) {
 	config = withConfigDefaults(config)
 	if _, err := parseHTTPURL(config.TokenEndpoint); err != nil {
 		return nil, fmt.Errorf("OAuth 2.0 HTTP tokenEndpoint: %w", err)
 	}
+	httpClient, err := newAddressPolicyClient(httpClient, config.RequestTimeout, defaultAddressPolicy())
+	if err != nil {
+		return nil, err
+	}
 	authMethod := oauthtoken.ClientSecretPost
 	if config.TokenEndpointAuthMethod == TokenEndpointAuthMethodClientSecretBasic {
 		authMethod = oauthtoken.ClientSecretBasic
-	}
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: config.RequestTimeout}
 	}
 	return &CredentialRefreshDriver{
 		tokenEndpointURL: config.TokenEndpoint, authMethod: authMethod, httpClient: httpClient, now: time.Now,
@@ -92,6 +94,7 @@ func (driver *CredentialRefreshDriver) Refresh(
 	case sdkgo.IsReauthorizationRequired(err):
 		return sdkgo.CredentialRefreshResult[Credentials]{}, err
 	case err != nil:
+		// A refused address stays in the chain, so the operation reports a defect instead of retrying.
 		return sdkgo.CredentialRefreshResult[Credentials]{}, errors.Join(errCredentialRefreshUnavailable, err)
 	}
 	credentials.AccessToken = token.AccessToken

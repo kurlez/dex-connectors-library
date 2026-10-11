@@ -8,7 +8,6 @@ package oauth2http_test
 import (
 	"context"
 	"net/http"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,20 +26,19 @@ func (clock *keycloakClock) now() time.Time {
 	return time.Now().Add(time.Duration(clock.offset.Load()))
 }
 
-// advancingTransport moves the clock forward after Keycloak answers 401 to a UserInfo request, which is the
-// moment a stored expiry that was wrong by minutes has been proven by the server.
-type advancingTransport struct {
-	next    http.RoundTripper
+// advancingCredentials moves the clock forward when the operation asks for a renewal after Keycloak
+// answered 401, which is the moment a stored expiry that was wrong by minutes has been proven by the server.
+type advancingCredentials struct {
+	*testsupport.RefreshingCredentials[oauth2http.Credentials]
 	clock   *keycloakClock
 	advance time.Duration
 }
 
-func (transport advancingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	response, err := transport.next.RoundTrip(request)
-	if err == nil && response.StatusCode == http.StatusUnauthorized && strings.HasSuffix(request.URL.Path, "/userinfo") {
-		transport.clock.offset.Add(int64(transport.advance))
-	}
-	return response, err
+func (credentials advancingCredentials) ResolveAfterRejection(
+	ctx context.Context, call sdkgo.Call, driver sdkgo.CredentialRefreshDriver[oauth2http.Credentials],
+) (oauth2http.Credentials, error) {
+	credentials.clock.offset.Add(int64(credentials.advance))
+	return credentials.RefreshingCredentials.ResolveAfterRejection(ctx, call, driver)
 }
 
 type keycloakSession struct {
@@ -63,9 +61,7 @@ func newKeycloakSession(t *testing.T, keycloak *keycloakServer, grant keycloakGr
 	client, err := oauth2http.New(oauth2http.Config{
 		AuthorizationEndpoint: keycloak.endpoints.Authorization, TokenEndpoint: keycloak.endpoints.Token,
 		Scopes: []string{"openid", "profile"}, APIBaseURL: keycloak.baseURL,
-	}, credentials, oauth2http.WithClock(clock.now), oauth2http.WithHTTPClient(&http.Client{
-		Transport: advancingTransport{next: http.DefaultTransport, clock: clock, advance: advanceOnUnauthorized},
-	}))
+	}, advancingCredentials{RefreshingCredentials: credentials, clock: clock, advance: advanceOnUnauthorized}, oauth2http.WithClock(clock.now))
 	require.NoError(t, err)
 	return &keycloakSession{keycloak: keycloak, client: client, credentials: credentials, clock: clock}
 }

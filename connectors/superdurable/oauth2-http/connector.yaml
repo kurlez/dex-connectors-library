@@ -21,7 +21,7 @@ spec:
       - name: tokenEndpoint
         goName: TokenEndpoint
         type: url
-        description: "URL of the authorization server's OAuth 2.0 token endpoint, which Dex Web calls to exchange the authorization code and the connector calls to refresh the access token. Copy the token_endpoint value from the same discovery document; a Keycloak realm shows it as https://HOST/realms/REALM/protocol/openid-connect/token. An http:// URL is accepted for a server on a private network, but then the client secret and the refresh token cross the network unencrypted. Required: neither authorization nor refresh can run without it."
+        description: "URL of the authorization server's OAuth 2.0 token endpoint, which Dex Web calls to exchange the authorization code and the connector calls to refresh the access token. Copy the token_endpoint value from the same discovery document; a Keycloak realm shows it as https://HOST/realms/REALM/protocol/openid-connect/token. The connector connects to an http:// URL only when the host resolves to loopback or private addresses, and the client secret and the refresh token then cross that network unencrypted; it never connects to a link-local address, such as the cloud metadata address, even over https. Required: neither authorization nor refresh can run without it."
         required: true
       - name: scopes
         goName: Scopes
@@ -38,7 +38,7 @@ spec:
       - name: apiBaseUrl
         goName: APIBaseURL
         type: url
-        description: "Base URL of the OAuth-protected API, such as https://api.example.com/v2 or the authorization server's own origin for its UserInfo endpoint. A request path is appended to it, and an absolute request URL must have the same scheme, host, and port: the access token is never sent anywhere else. It carries no user information, query, or fragment. An http:// URL is accepted for a server on a private network, but then the access token crosses the network unencrypted. Required: no request can be sent without it."
+        description: "Base URL of the OAuth-protected API, such as https://api.example.com/v2 or the authorization server's own origin for its UserInfo endpoint. A request path is appended to it, and an absolute request URL must have the same scheme, host, and port: the access token is never sent anywhere else. It carries no user information, query, or fragment. The connector connects to an http:// URL only when the host resolves to loopback or private addresses, and the access token then crosses that network unencrypted; it never connects to a link-local address, such as the cloud metadata address, even over https. Required: no request can be sent without it."
         required: true
       - name: maxBodyBytes
         goName: MaxBodyBytes

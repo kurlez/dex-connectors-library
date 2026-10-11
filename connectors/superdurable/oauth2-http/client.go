@@ -13,8 +13,9 @@
 //
 // The token is sent only to the API base URL's origin, redirects are never followed, and the response
 // body is bounded. Endpoints that the connection owner enters may use plain http, because the library
-// cannot know where the server runs; the connection owner then accepts that tokens cross the network
-// unencrypted.
+// cannot know where the server runs. The dialer then connects only when every address the host resolves
+// to is loopback or private, and never to a link-local address such as the cloud metadata address, even
+// over https. Tokens cross a private network unencrypted.
 package oauth2http
 
 import (
@@ -26,7 +27,6 @@ import (
 	"time"
 
 	"github.com/superdurable/dex-connectors-library/sdkgo"
-	"github.com/superdurable/dex-connectors-library/sdkgo/providerhttp"
 )
 
 const (
@@ -40,14 +40,18 @@ const (
 type Option func(*clientOptions)
 
 type clientOptions struct {
-	httpClient *http.Client
-	now        func() time.Time
+	httpClient    *http.Client
+	now           func() time.Time
+	addressPolicy addressPolicy
 }
 
 // WithHTTPClient overrides the default HTTP client. The caller retains ownership of the client and its
-// transport. The connector uses a copy that never follows a redirect, so a token is never replayed to
-// another host, and that applies the connection's requestTimeout when the client sets none. The same
-// client also carries token refresh requests.
+// transport, which must be nil or an *http.Transport; New fails for another transport, because the
+// connector must own the dialer. The connector uses a copy that never follows a redirect, so a token is
+// never replayed to another host, and that applies the connection's requestTimeout when the client sets
+// none. The copy keeps the transport's TLS and pool settings, ignores its proxy settings, and connects
+// only as the address policy allows: plain http to loopback and private addresses, https to any address
+// except link-local ones, which are never allowed. The same client also carries token refresh requests.
 func WithHTTPClient(client *http.Client) Option {
 	return func(options *clientOptions) { options.httpClient = client }
 }
@@ -81,7 +85,7 @@ func New(config Config, credentials CredentialSource, options ...Option) (*Clien
 	if credentials == nil {
 		return nil, errors.New("OAuth 2.0 HTTP credential provider is required")
 	}
-	dependencies := clientOptions{now: time.Now}
+	dependencies := clientOptions{now: time.Now, addressPolicy: defaultAddressPolicy()}
 	for _, option := range options {
 		if option == nil {
 			return nil, errors.New("OAuth 2.0 HTTP connector option is nil")
@@ -101,7 +105,10 @@ func New(config Config, credentials CredentialSource, options ...Option) (*Clien
 	if err != nil {
 		return nil, err
 	}
-	httpClient := providerhttp.NewProviderHTTPClient(dependencies.httpClient, config.RequestTimeout)
+	httpClient, err := newAddressPolicyClient(dependencies.httpClient, config.RequestTimeout, dependencies.addressPolicy)
+	if err != nil {
+		return nil, err
+	}
 	refreshDriver, err := NewCredentialRefreshDriver(config, httpClient)
 	if err != nil {
 		return nil, err

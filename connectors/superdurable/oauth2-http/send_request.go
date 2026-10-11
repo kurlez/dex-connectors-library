@@ -116,7 +116,11 @@ func (operation SendRequestOperation) Invoke(call sdkgo.Call, input SendRequestI
 func (operation SendRequestOperation) credentialFailure(
 	ctx context.Context, err error, credentials Credentials,
 ) (sdkgo.MutationAttempt[SendRequestOutput], bool) {
+	var refusal *addressRefusal
 	switch {
+	case errors.As(err, &refusal):
+		return sendRequestBranch(SendRequestBranchDefect, SendRequestOutput{}, sdkgo.FailureValidation,
+			describeRefusal("tokenEndpoint", refusal), sdkgo.Receipt{}), true
 	case sdkgo.IsReauthorizationRequired(err):
 		return sendRequestBranch(SendRequestBranchRejected, SendRequestOutput{}, sdkgo.FailureAuthentication,
 			"the OAuth authorization must be renewed in Dex Web Connections", sdkgo.Receipt{}), true
@@ -140,6 +144,8 @@ type httpExchange struct {
 	// was written to the connection before it.
 	err          error
 	isDispatched bool
+	// refusal is set when the address policy refused the connection, so no request was sent.
+	refusal *addressRefusal
 }
 
 // exchange sends the planned request once with credentials' access token. It reads at most maxBodyBytes+1
@@ -171,6 +177,10 @@ func (client *Client) exchange(ctx context.Context, call sdkgo.Call, request pla
 	}
 	response, err := client.httpClient.Do(httpRequest)
 	if err != nil {
+		var refusal *addressRefusal
+		if errors.As(err, &refusal) {
+			return httpExchange{err: errors.New("the connection was refused"), refusal: refusal}
+		}
 		return httpExchange{err: errors.New("the request failed before an answer arrived"), isDispatched: isDispatched.Load()}
 	}
 	defer response.Body.Close()
@@ -197,6 +207,9 @@ func (operation SendRequestOperation) attemptFor(
 	output := responseOutput(answer, usedTokens)
 	status := answer.statusCode
 	switch {
+	case answer.refusal != nil:
+		return sendRequestBranch(SendRequestBranchDefect, SendRequestOutput{}, sdkgo.FailureValidation,
+			describeRefusal("apiBaseUrl", answer.refusal), sdkgo.Receipt{})
 	case answer.err != nil && !answer.isDispatched:
 		return sdkgo.NewMutationRetry[SendRequestOutput](sendRequestFailure(sdkgo.FailureAvailability,
 			"the API could not be reached; no request was sent"), 0)

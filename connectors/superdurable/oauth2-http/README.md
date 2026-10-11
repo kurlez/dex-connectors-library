@@ -78,11 +78,22 @@ refresh certain by moving the clock past the stored expiry.
 - **Redaction.** The access tokens a request used are replaced by `[REDACTED]`
   in the returned body if the API echoes them.
 - **Bounded reads.** A response is cut at `maxBodyBytes` and marked truncated.
-- **Plain http.** The three URLs the connection owner enters may use `http://`,
-  for an identity provider on a private network. Then the authorization code,
-  the client secret, the refresh token, and the access token cross the network
-  unencrypted. Use `https://` anywhere a network between the Worker and the
-  server is not trusted.
+- **Plain http and the dialer.** The three URLs the connection owner enters may
+  use `http://`. The connector's dialer resolves each host once, checks every
+  resolved address, and connects only to an address it checked:
+  - `http` connects only when every resolved address is loopback or private
+    (`127.0.0.0/8`, `::1`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+    `fc00::/7`);
+  - any other `http` host, including one with a single public address, is
+    refused and selects `defect`; use `https`;
+  - link-local addresses (`169.254.0.0/16` and `fe80::/10`, which include the
+    cloud metadata service), the IPv6 metadata address `fd00:ec2::254`, and
+    unspecified or multicast addresses are never allowed, even over `https`.
+
+  The connector uses its own transport, so `WithHTTPClient` accepts a client
+  whose transport is nil or an `*http.Transport` and ignores its proxy settings;
+  another transport makes `New` fail. Over a private network the authorization
+  code, the client secret, and the tokens still travel unencrypted.
 
 ## Authorization server setup
 
@@ -126,7 +137,7 @@ A Keycloak realm on a private network, as the settings of a connection:
 | `authorizationEndpoint` | Required. Where Dex Web sends the user to approve access. |
 | `tokenEndpoint` | Required. Where the code is exchanged and the token refreshed. |
 | `scopes` | Required. Scopes to request, one per entry. |
-| `tokenEndpointAuthMethod` | `client_secret_post` (default) or `client_secret_basic`: how a refresh presents the client. |
+| `tokenEndpointAuthMethod` | `client_secret_post` (default) or `client_secret_basic`: how a refresh presents the client. The manifest cannot yet declare this as the source for a host's code exchange. |
 | `apiBaseUrl` | Required. Base URL of the protected API; the only origin that receives the token. |
 | `maxBodyBytes` | Largest request and response body. Blank uses 1 MiB. |
 | `requestTimeout` | Longest single HTTP request. Blank uses 12 seconds. |
