@@ -19,7 +19,7 @@ connection.
 Install a published component release:
 
 ```bash
-go get github.com/superdurable/dex-connectors-library/connectors/openai@v0.21.0
+go get github.com/superdurable/dex-connectors-library/connectors/openai@v0.21.1
 ```
 
 ## Connection
