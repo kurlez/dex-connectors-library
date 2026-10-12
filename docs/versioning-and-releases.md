@@ -225,6 +225,13 @@ optional Studio UI artifact identity and compatibility metadata.
 SuperVerse Catalog consumes that artifact instead of inferring a version from
 source files.
 
+The artifact lists every authentication method under `authMethods` with its
+`hostKeptCredentials`, an empty array `[]` for a method whose host keeps
+nothing. `connectorctl release-artifact` fails the release build when an
+entry is missing, has no `hostKeptCredentials`, or has `null` instead of an
+array, so every release, candidate, and compatibility build carries the key. A
+host fails closed on a release without it.
+
 Breaking changes use the exact lowercase `(breaking)` marker in a PR title,
 PR body, or direct commit message. A v0 breaking release cannot use a patch
 bump. At v1 or later, a breaking release requires a major bump and the Go
