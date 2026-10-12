@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "zoho-us-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"zoho-us-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"zoho-us-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "zoho-us-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -386,7 +386,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "zoho-eu-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"zoho-eu-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"zoho-eu-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "zoho-eu-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -394,7 +394,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "zoho-in-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"zoho-in-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"zoho-in-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "zoho-in-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -402,7 +402,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "zoho-au-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"zoho-au-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"zoho-au-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "zoho-au-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -410,7 +410,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "zoho-jp-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"zoho-jp-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"zoho-jp-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "zoho-jp-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -418,7 +418,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "zoho-ca-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"zoho-ca-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"zoho-ca-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "zoho-ca-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -426,7 +426,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "zoho-sa-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"zoho-sa-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"zoho-sa-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "zoho-sa-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -434,7 +434,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "zoho-sg-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"zoho-sg-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"zoho-sg-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "zoho-sg-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -442,7 +442,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "zoho-ae-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"zoho-ae-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"zoho-ae-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "zoho-ae-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},

@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "salesforce-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"salesforce-oauth\",\"instance_url\":\"manifest-instance_url\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"salesforce-oauth","instance_url":"manifest-instance_url","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "salesforce-oauth", "instance_url": "manifest-instance_url", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -386,7 +386,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "salesforce-sandbox-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"salesforce-sandbox-oauth\",\"instance_url\":\"manifest-instance_url\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"salesforce-sandbox-oauth","instance_url":"manifest-instance_url","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "salesforce-sandbox-oauth", "instance_url": "manifest-instance_url", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -394,7 +394,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "salesforce-jwt-bearer",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"salesforce-jwt-bearer\",\"instance_url\":\"manifest-instance_url\",\"jwt_login_environment\":\"production\",\"jwt_private_key\":\"manifest-jwt_private_key\",\"jwt_username\":\"manifest-jwt_username\",\"oauth_client_id\":\"manifest-oauth_client_id\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"salesforce-jwt-bearer","instance_url":"manifest-instance_url","jwt_login_environment":"production","jwt_private_key":"manifest-jwt_private_key","jwt_username":"manifest-jwt_username","oauth_client_id":"manifest-oauth_client_id"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "salesforce-jwt-bearer", "instance_url": "manifest-instance_url", "jwt_login_environment": "production", "jwt_private_key": "manifest-jwt_private_key", "jwt_username": "manifest-jwt_username", "oauth_client_id": "manifest-oauth_client_id"},
 			hostKept:           []string{"jwt_private_key"},
 			required:           []string{"oauth_client_id", "jwt_username", "access_token"},

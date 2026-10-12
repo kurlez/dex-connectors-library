@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "microsoft-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"microsoft-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"microsoft-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "microsoft-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
@@ -386,7 +386,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "microsoft-app-only",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"app_client_id\":\"manifest-app_client_id\",\"app_client_secret\":\"manifest-app_client_secret\",\"auth_method\":\"microsoft-app-only\",\"tenant_id\":\"manifest-tenant_id\"}",
+			credential:         `{"access_token":"manifest-access_token","app_client_id":"manifest-app_client_id","app_client_secret":"manifest-app_client_secret","auth_method":"microsoft-app-only","tenant_id":"manifest-tenant_id"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "app_client_id": "manifest-app_client_id", "app_client_secret": "manifest-app_client_secret", "auth_method": "microsoft-app-only", "tenant_id": "manifest-tenant_id"},
 			hostKept:           []string{"app_client_secret"},
 			required:           []string{"tenant_id", "app_client_id", "access_token"},

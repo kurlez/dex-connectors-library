@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"go/format"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -87,7 +86,7 @@ func writeSharedCredentialMethod(generation *generator, manifest schema.Manifest
 		name = "spec.auth"
 	}
 	generation.mustWrite("\t\t{\n\t\t\tname: %q,\n", name)
-	generation.mustWrite("\t\t\tcredential: %s,\n", strconv.Quote(string(encoded)))
+	generation.mustWrite("\t\t\tcredential: `%s`,\n", encoded)
 	generation.mustWrite("\t\t\tdecoded: %s,\n", goStringMap(decoded))
 	generation.mustWrite("\t\t\thostKept: %s,\n", goStringSlice(hostKept))
 	generation.mustWrite("\t\t\trequired: %s,\n", goStringSlice(required))

@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "spec.auth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"app_id\":\"manifest-app_id\",\"app_secret\":\"manifest-app_secret\",\"webhook_secret\":\"manifest-webhook_secret\"}",
+			credential:         `{"access_token":"manifest-access_token","app_id":"manifest-app_id","app_secret":"manifest-app_secret","webhook_secret":"manifest-webhook_secret"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "app_id": "manifest-app_id", "app_secret": "manifest-app_secret", "webhook_secret": "manifest-webhook_secret"},
 			hostKept:           []string{"app_secret"},
 			required:           []string{"app_id", "access_token"},

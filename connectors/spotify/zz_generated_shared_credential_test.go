@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "spec.auth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"access_token"},

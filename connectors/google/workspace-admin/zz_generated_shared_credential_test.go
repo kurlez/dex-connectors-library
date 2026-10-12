@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "workspace-domain-delegation",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"workspace-domain-delegation\",\"delegated_user\":\"manifest-delegated_user\",\"service_account_key\":\"manifest-service_account_key\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"workspace-domain-delegation","delegated_user":"manifest-delegated_user","service_account_key":"manifest-service_account_key"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "workspace-domain-delegation", "delegated_user": "manifest-delegated_user", "service_account_key": "manifest-service_account_key"},
 			hostKept:           []string{"service_account_key"},
 			required:           []string{"delegated_user", "access_token"},
@@ -386,7 +386,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "google-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"google-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"google-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "google-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},

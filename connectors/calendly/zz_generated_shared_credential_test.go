@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "personal-access-token",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"personal-access-token\",\"webhook_signing_key\":\"manifest-webhook_signing_key\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"personal-access-token","webhook_signing_key":"manifest-webhook_signing_key"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "personal-access-token", "webhook_signing_key": "manifest-webhook_signing_key"},
 			hostKept:           []string{},
 			required:           []string{"access_token"},
@@ -386,7 +386,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "calendly-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"calendly-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\",\"webhook_signing_key\":\"manifest-webhook_signing_key\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"calendly-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token","webhook_signing_key":"manifest-webhook_signing_key"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "calendly-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token", "webhook_signing_key": "manifest-webhook_signing_key"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},

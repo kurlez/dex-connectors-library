@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "entra-app-only",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"entra-app-only\",\"client_id\":\"manifest-client_id\",\"client_secret\":\"manifest-client_secret\",\"tenant_id\":\"manifest-tenant_id\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"entra-app-only","client_id":"manifest-client_id","client_secret":"manifest-client_secret","tenant_id":"manifest-tenant_id"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "entra-app-only", "client_id": "manifest-client_id", "client_secret": "manifest-client_secret", "tenant_id": "manifest-tenant_id"},
 			hostKept:           []string{"client_secret"},
 			required:           []string{"tenant_id", "client_id", "access_token"},
@@ -386,7 +386,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "microsoft-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"microsoft-oauth\",\"client_id\":\"manifest-client_id\",\"client_secret\":\"manifest-client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"microsoft-oauth","client_id":"manifest-client_id","client_secret":"manifest-client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "microsoft-oauth", "client_id": "manifest-client_id", "client_secret": "manifest-client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"client_secret", "refresh_token"},
 			required:           []string{"client_id", "access_token"},

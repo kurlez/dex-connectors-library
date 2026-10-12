@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "user-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"user-oauth\",\"client_id\":\"manifest-client_id\",\"client_secret\":\"manifest-client_secret\",\"instance_url\":\"manifest-instance_url\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"user-oauth","client_id":"manifest-client_id","client_secret":"manifest-client_secret","instance_url":"manifest-instance_url","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "user-oauth", "client_id": "manifest-client_id", "client_secret": "manifest-client_secret", "instance_url": "manifest-instance_url", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"client_secret", "refresh_token"},
 			required:           []string{"client_id", "access_token"},
@@ -386,7 +386,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "bot-oauth",
-			credential:         "{\"auth_method\":\"bot-oauth\",\"bot_refresh_token\":\"manifest-bot_refresh_token\",\"bot_token\":\"manifest-bot_token\",\"client_id\":\"manifest-client_id\",\"client_secret\":\"manifest-client_secret\",\"user_refresh_token\":\"manifest-user_refresh_token\",\"user_token\":\"manifest-user_token\"}",
+			credential:         `{"auth_method":"bot-oauth","bot_refresh_token":"manifest-bot_refresh_token","bot_token":"manifest-bot_token","client_id":"manifest-client_id","client_secret":"manifest-client_secret","user_refresh_token":"manifest-user_refresh_token","user_token":"manifest-user_token"}`,
 			decoded:            map[string]string{"auth_method": "bot-oauth", "bot_refresh_token": "manifest-bot_refresh_token", "bot_token": "manifest-bot_token", "client_id": "manifest-client_id", "client_secret": "manifest-client_secret", "user_refresh_token": "manifest-user_refresh_token", "user_token": "manifest-user_token"},
 			hostKept:           []string{"client_secret", "bot_refresh_token", "user_refresh_token"},
 			required:           []string{"client_id", "bot_token", "user_token"},
@@ -394,7 +394,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "app-only",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"app-only\",\"client_id\":\"manifest-client_id\",\"client_secret\":\"manifest-client_secret\",\"tenant_id\":\"manifest-tenant_id\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"app-only","client_id":"manifest-client_id","client_secret":"manifest-client_secret","tenant_id":"manifest-tenant_id"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "app-only", "client_id": "manifest-client_id", "client_secret": "manifest-client_secret", "tenant_id": "manifest-tenant_id"},
 			hostKept:           []string{"client_secret"},
 			required:           []string{"tenant_id", "client_id", "access_token"},
@@ -402,7 +402,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "delegation",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"delegation\",\"delegated_user\":\"manifest-delegated_user\",\"primary_email\":\"manifest-primary_email\",\"service_account_key\":\"manifest-service_account_key\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"delegation","delegated_user":"manifest-delegated_user","primary_email":"manifest-primary_email","service_account_key":"manifest-service_account_key"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "delegation", "delegated_user": "manifest-delegated_user", "primary_email": "manifest-primary_email", "service_account_key": "manifest-service_account_key"},
 			hostKept:           []string{"service_account_key"},
 			required:           []string{"delegated_user", "access_token"},
@@ -410,7 +410,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "jwt-bearer",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"jwt-bearer\",\"client_id\":\"manifest-client_id\",\"instance_url\":\"manifest-instance_url\",\"login_environment\":\"production\",\"private_key\":\"manifest-private_key\",\"username\":\"manifest-username\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"jwt-bearer","client_id":"manifest-client_id","instance_url":"manifest-instance_url","login_environment":"production","private_key":"manifest-private_key","username":"manifest-username"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "jwt-bearer", "client_id": "manifest-client_id", "instance_url": "manifest-instance_url", "login_environment": "production", "private_key": "manifest-private_key", "username": "manifest-username"},
 			hostKept:           []string{"private_key"},
 			required:           []string{"client_id", "username", "access_token"},

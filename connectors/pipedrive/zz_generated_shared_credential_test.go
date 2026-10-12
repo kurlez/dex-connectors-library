@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "api-token",
-			credential:         "{\"api_token\":\"manifest-api_token\",\"auth_method\":\"api-token\"}",
+			credential:         `{"api_token":"manifest-api_token","auth_method":"api-token"}`,
 			decoded:            map[string]string{"api_token": "manifest-api_token", "auth_method": "api-token"},
 			hostKept:           []string{},
 			required:           []string{"api_token"},
@@ -386,7 +386,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "pipedrive-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"api_domain\":\"manifest-api_domain\",\"auth_method\":\"pipedrive-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\"}",
+			credential:         `{"access_token":"manifest-access_token","api_domain":"manifest-api_domain","auth_method":"pipedrive-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "api_domain": "manifest-api_domain", "auth_method": "pipedrive-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},

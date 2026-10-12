@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 	return []sharedCredentialMethod{
 		{
 			name:               "personal-api-key",
-			credential:         "{\"api_key\":\"manifest-api_key\",\"auth_method\":\"personal-api-key\",\"webhook_signing_secret\":\"manifest-webhook_signing_secret\"}",
+			credential:         `{"api_key":"manifest-api_key","auth_method":"personal-api-key","webhook_signing_secret":"manifest-webhook_signing_secret"}`,
 			decoded:            map[string]string{"api_key": "manifest-api_key", "auth_method": "personal-api-key", "webhook_signing_secret": "manifest-webhook_signing_secret"},
 			hostKept:           []string{},
 			required:           []string{"api_key"},
@@ -386,7 +386,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 		},
 		{
 			name:               "linear-oauth",
-			credential:         "{\"access_token\":\"manifest-access_token\",\"auth_method\":\"linear-oauth\",\"oauth_client_id\":\"manifest-oauth_client_id\",\"oauth_client_secret\":\"manifest-oauth_client_secret\",\"refresh_token\":\"manifest-refresh_token\",\"webhook_signing_secret\":\"manifest-webhook_signing_secret\"}",
+			credential:         `{"access_token":"manifest-access_token","auth_method":"linear-oauth","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","refresh_token":"manifest-refresh_token","webhook_signing_secret":"manifest-webhook_signing_secret"}`,
 			decoded:            map[string]string{"access_token": "manifest-access_token", "auth_method": "linear-oauth", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "refresh_token": "manifest-refresh_token", "webhook_signing_secret": "manifest-webhook_signing_secret"},
 			hostKept:           []string{"oauth_client_secret", "refresh_token"},
 			required:           []string{"oauth_client_id", "access_token"},
