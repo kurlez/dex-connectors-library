@@ -39,12 +39,26 @@ type LoadedProject struct {
 	Snapshot SnapshotRef
 }
 
+// LocalConnectionsFileEnvironment names the environment variable that selects local development: the path of the
+// connections.json file that Dex Web writes under dexcli dev. Dex Web shows the launch command that sets it.
+const LocalConnectionsFileEnvironment = "DEX_CONNECTOR_CONFIG_FILE"
+
 // LoadFromEnvironment loads the trusted DEX_PROJECT_* deployment contract and AWS default credential chain.
+// When DEX_CONNECTOR_CONFIG_FILE names the connections file of Dex Web under dexcli dev, it instead loads those
+// local connections through the same project protocol; see the README's Local development section.
 // It reads only the pinned ordinary snapshot at startup; no credential read or provider refresh occurs.
 // A shared entry's credential is read from the credential broker when a call first uses it, so an application
 // starts while the broker is unavailable.
 // Hosted storage requires an exact KMS key ARN. Local S3 endpoints require explicit local-storage opt-in.
 func LoadFromEnvironment(ctx context.Context) (*LoadedProject, error) {
+	if path := os.Getenv(LocalConnectionsFileEnvironment); path != "" {
+		for _, name := range []string{"DEX_PROJECT_ID", "DEX_PROJECT_SCOPE", "DEX_PROJECT_CONFIG_KEY", "DEX_PROJECT_STORAGE_BUCKET"} {
+			if os.Getenv(name) != "" {
+				return nil, errors.New(LocalConnectionsFileEnvironment + " and " + name + " select different project configurations; set only one of them")
+			}
+		}
+		return loadDexWebProject(ctx, path)
+	}
 	scope := Scope{ProjectID: os.Getenv("DEX_PROJECT_ID"), Kind: os.Getenv("DEX_PROJECT_SCOPE")}
 	if _, err := scope.Prefix(); err != nil {
 		return nil, err

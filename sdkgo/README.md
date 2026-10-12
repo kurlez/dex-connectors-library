@@ -16,8 +16,10 @@ Credentials stay in project storage and are resolved during each call. The
 generated code chooses `provider.NewCredentialProvider` or
 `provider.NewRefreshingCredentialProvider` from the manifest's
 `auth.refreshable`, so an application never wires credentials, codecs, or
-refresh. Local development uses the same project configuration on a local
-S3-compatible store.
+refresh. Local development under `dexcli dev` starts the application with
+`DEX_CONNECTOR_CONFIG_FILE` set to the connections file of Dex Web, which
+`LoadFromEnvironment` reads through the same project configuration; see
+[Local development with Dex Web](projectconfig/README.md#local-development-with-dex-web).
 
 Connector Trigger sources run outside Dex Steps and deliver typed, stable-ID
 events through `TriggerRunner`. Generated Trigger factories accept any typed
