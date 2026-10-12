@@ -232,3 +232,19 @@ func TestProjectConfigTestLoadsAProjectThatServesRelayedTriggers(t *testing.T) {
 	_, err = projectconfigtest.LoadProject(context.Background(), nil, sharedScope, reference)
 	require.Error(t, err)
 }
+
+func TestSignRelayedRequestProducesWhatVerifyRelayedRequestAccepts(t *testing.T) {
+	fixture := newUnreadSharedFixture(t, sharedScope, staticReply(1, sharedAccessOne))
+	body := []byte(`{"event_id":"Ev1"}`)
+	signature := projectconfig.SignRelayedRequest(scopeToken, epoch, body)
+	require.Equal(t, signedRelayHeader(scopeToken, epoch, body).Get(projectconfig.RelaySignatureHeader), signature)
+
+	header := http.Header{}
+	header.Set(projectconfig.RelayTimestampHeader, strconv.FormatInt(epoch.Unix(), 10))
+	header.Set(projectconfig.RelaySignatureHeader, signature)
+	require.NoError(t, fixture.project.VerifyRelayedRequest(context.Background(), header, body, epoch))
+
+	require.ErrorIs(t, fixture.project.VerifyRelayedRequest(context.Background(), header, []byte(`{"event_id":"Ev2"}`), epoch), projectconfig.ErrRelaySignatureInvalid)
+	header.Set(projectconfig.RelaySignatureHeader, projectconfig.SignRelayedRequest("another-scope-token", epoch, body))
+	require.ErrorIs(t, fixture.project.VerifyRelayedRequest(context.Background(), header, body, epoch), projectconfig.ErrRelaySignatureInvalid)
+}

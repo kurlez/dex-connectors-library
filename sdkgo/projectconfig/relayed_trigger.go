@@ -162,6 +162,14 @@ func (project *LoadedProject) VerifyRelayedRequest(ctx context.Context, header h
 	return ErrRelaySignatureInvalid
 }
 
+// SignRelayedRequest returns the RelaySignatureHeader value for a relayed Trigger request: "v1=" and the hexadecimal
+// HMAC-SHA256 of "v1:<unix seconds of timestamp>:<body>" keyed with the scope token. The host sends the same Unix
+// seconds in RelayTimestampHeader, and VerifyRelayedRequest checks the pair with the same computation. body is the
+// raw request body.
+func SignRelayedRequest(token string, timestamp time.Time, body []byte) string {
+	return relaySignatureVersion + "=" + hex.EncodeToString(relaySignature(token, strconv.FormatInt(timestamp.Unix(), 10), body))
+}
+
 func relaySignature(token string, timestamp string, body []byte) []byte {
 	mac := hmac.New(sha256.New, []byte(token))
 	_, _ = mac.Write([]byte(relaySignatureVersion + ":" + timestamp + ":"))
