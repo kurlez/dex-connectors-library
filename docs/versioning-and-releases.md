@@ -62,6 +62,11 @@ major version without authorizing again:
   names with `{fromSetting}`, and the `scopes` of its `clientCredentials` or
   `serviceAccount.jwtBearer` grant from the first release that declares the
   grant;
+- every authentication method keeps its host-kept credentials (see
+  [Host-kept credentials](manifest-authoring.md#host-kept-credentials)), from
+  the first release whose source contains the host-kept rule, because a host
+  strips them by the latest release's declarations and an earlier release
+  decodes the shared credential without exactly those fields;
 - `spec.auth.defaultMethod` stays the same, because a credential saved without
   a method uses the default method;
 - the settings, `spec.configuration` and each method's `configuration`, only
@@ -91,7 +96,11 @@ the comparison when that major version has no release yet. `connectorctl release
 pending release, so `make catalog-check` checks a pull request and the release
 workflow checks `main` before it publishes anything. `connectorctl
 release-candidate` applies it to every candidate. A rejection lists each break
-and names the major version the change needs.
+and names the major version the change needs. It compares host-kept
+credentials when the latest release's source commit contains
+`schema/host_kept_credentials.go`, which defines them; releases built before it
+published none, so the first releases that declare minting grants establish
+them.
 
 ## Dex versions
 

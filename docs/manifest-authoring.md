@@ -455,6 +455,56 @@ serviceAccount:
       - {credential: primary_email, fromCredential: delegated_user}
 ```
 
+### Host-kept credentials
+
+A host that keeps a shared connection keeps the credential fields that only
+its token requests use, and serves the credential to applications without
+them, so code that an application runs can never refresh or mint the shared
+credential or rotate a single-use refresh token away from the other
+applications. The fields follow from the declarations, with no field of their
+own:
+
+- an `oauth2` method's `clientSecretCredential`, every `refresh.grants`
+  `refreshTokenCredential`, and every field that a credential mapping of the
+  method or of a grant fills from a `refresh_token` member, such as
+  `refresh_token` or `authed_user.refresh_token`;
+- a `clientCredentials` grant's `clientSecretCredential`;
+- a `serviceAccount.jwtBearer` grant's `keyCredential` and the field that its
+  `privateKey` names with `{fromCredential}`.
+
+A `jwtBearer` `privateKey` is therefore `{fromKey}` or `{fromCredential}` of a
+`secretString` field, without `values`, and no `credentialCopies` entry copies
+a host-kept field. `schema.HostKeptCredentials` implements the rule, and each
+release lists the result as `hostKeptCredentials` for every method under
+`authMethods` in `connector-release.json`, which a host reads instead of
+deriving the fields again. The host-kept credentials of a method are part of
+the [connection contract](versioning-and-releases.md#connection-compatibility).
+
+For a connector whose host keeps some field, `connectorctl generate` adds
+`UnmarshalSharedCredential` to the generated `Credentials`. The Connector SDK
+decodes a shared entry's credential with it (see
+[Shared connections](../sdkgo/projectconfig/README.md#host-kept-secrets)). It
+requires every field that `Validate` requires except the host-kept ones, and
+the access token that a `clientCredentials` or `jwtBearer` grant mints, because
+an application of a shared connection cannot mint it. It accepts host-kept
+fields that a broker still sends.
+
+The generated `zz_generated_shared_credential_test.go` checks the connector:
+
+- each method's sample credential decodes without its host-kept fields and with
+  them, `Validate` still requires a required host-kept field, and every other
+  required field stays required;
+- it type-checks every non-test package of the connector module and fails when
+  code reads a host-kept field of `Credentials` anywhere except the generated
+  codec and `CredentialRefreshDriver.Refresh` with the unexported functions it
+  uses, or passes a value that holds `Credentials` to `reflect`, `fmt`, `log`,
+  `log/slog`, or an encoding package.
+
+A shared entry never calls the refresh driver, so with these checks an
+application of a shared connection calls its provider with the access token
+alone. `go test` of the connector runs the test, and `connectorctl generate
+--check` keeps it current.
+
 ### Value sources
 
 `tokenEndpointAuthMethod`, `tokenEndpoint` of `clientCredentials`, and every
