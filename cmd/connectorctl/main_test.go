@@ -74,7 +74,7 @@ func TestRegisteredGoogleConnectorsRequestNoAliasOAuthScopes(t *testing.T) {
 				continue
 			}
 			checkedConnector = true
-			for _, scope := range append(append([]string{}, oauth.Scopes.Values...), oauth.UserScopes...) {
+			for _, scope := range append(append([]string{}, oauth.Scopes.List...), oauth.UserScopes...) {
 				canonicalScope, isGoogleAlias := canonicalScopeByGoogleAlias[scope]
 				require.Falsef(t, isGoogleAlias, "%s requests Google alias scope %q; request %q instead", entry.Directory, scope, canonicalScope)
 			}
@@ -144,6 +144,46 @@ func TestReleaseArtifactIsDeterministicAndVersioned(t *testing.T) {
 	mismatchedArguments := arguments(filepath.Join(directory, "mismatch.json"), filepath.Join(directory, "mismatch.json.sha256"))
 	mismatchedArguments[5] = "v0.1.1"
 	require.ErrorContains(t, releaseArtifact(mismatchedArguments), "does not match manifest version")
+}
+
+func TestReleaseArtifactPublishesTheHostKeptCredentialsOfEveryMethod(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		manifest string
+		expected []connectorReleaseAuthMethod
+	}{
+		"methods with every grant": {manifest: "token-grants.yaml", expected: []connectorReleaseAuthMethod{
+			{ID: "user-oauth", HostKeptCredentials: []string{"client_secret", "refresh_token"}},
+			{ID: "bot-oauth", HostKeptCredentials: []string{"client_secret", "bot_refresh_token", "user_refresh_token"}},
+			{ID: "app-only", HostKeptCredentials: []string{"client_secret"}},
+			{ID: "delegation", HostKeptCredentials: []string{"service_account_key"}},
+			{ID: "jwt-bearer", HostKeptCredentials: []string{"private_key"}},
+		}},
+		"a single method that keeps nothing": {manifest: "google-oauth.yaml", expected: []connectorReleaseAuthMethod{
+			{ID: "", HostKeptCredentials: []string{}},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			manifestPath := filepath.Join("..", "..", "schema", "testdata", testCase.manifest)
+			manifest, err := load(manifestPath)
+			require.NoError(t, err)
+			output := filepath.Join(t.TempDir(), "connector-release.json")
+			require.NoError(t, releaseArtifact([]string{
+				"--manifest", manifestPath, "--module-path", "example.com/connectors/fixture", "--version", manifest.Metadata.Version,
+				"--tag", "connectors/fixture/" + manifest.Metadata.Version, "--source-sha", strings.Repeat("a", 40),
+				"--output", output, "--digest-output", output + ".sha256",
+			}))
+			contents, err := os.ReadFile(output)
+			require.NoError(t, err)
+			var published struct {
+				AuthMethods []connectorReleaseAuthMethod `json:"authMethods"`
+			}
+			require.NoError(t, json.Unmarshal(contents, &published))
+			require.Equal(t, testCase.expected, published.AuthMethods)
+			if testCase.manifest == "google-oauth.yaml" {
+				require.Contains(t, string(contents), `"hostKeptCredentials": []`, "a method that keeps nothing says so")
+			}
+		})
+	}
 }
 
 func TestGeneratedConnectorsAreCurrent(t *testing.T) {
@@ -308,6 +348,70 @@ func TestReleaseArtifactPublishesAuthMethodManifestFields(t *testing.T) {
 	require.Equal(t, []wireField{{Name: "openaiProjectId", Required: true}}, spec.Auth.Methods[0].Configuration.Fields)
 	require.Equal(t, []wireField{{Name: "anthropicWorkspaceId"}}, spec.Auth.Methods[1].Configuration.Fields)
 	require.Equal(t, []wireField{{Name: "model", StudioUnit: map[string]string{"unit": "modelPicker", "port": "model"}}}, spec.Configuration.Fields)
+}
+
+func TestReleaseArtifactPublishesTokenGrantDeclarations(t *testing.T) {
+	release := filepath.Join(t.TempDir(), "connector-release.json")
+	require.NoError(t, releaseArtifact([]string{
+		"--manifest", filepath.Join("..", "..", "schema", "testdata", "token-grants.yaml"),
+		"--module-path", "github.com/superdurable/dex-connectors-library/connectors/example/tokengrants",
+		"--version", "v0.1.0", "--tag", "connectors/example/tokengrants/v0.1.0",
+		"--source-sha", strings.Repeat("a", 40), "--output", release, "--digest-output", release + ".sha256",
+	}))
+	releaseBytes, err := os.ReadFile(release)
+	require.NoError(t, err)
+	var releaseWire struct {
+		Manifest struct {
+			Spec struct {
+				Auth struct {
+					Methods []map[string]json.RawMessage `json:"methods"`
+				} `json:"auth"`
+			} `json:"spec"`
+		} `json:"manifest"`
+	}
+	require.NoError(t, json.Unmarshal(releaseBytes, &releaseWire))
+	methods := releaseWire.Manifest.Spec.Auth.Methods
+	require.Len(t, methods, 5)
+	require.JSONEq(t, `{
+		"authorizationEndpoint": "https://login.example.com/authorize",
+		"tokenEndpoint": "https://login.example.com/token",
+		"tokenEndpointAuthMethod": "client_secret_basic",
+		"tokenRequestEncoding": "json",
+		"clientIDCredential": "client_id",
+		"clientSecretCredential": "client_secret",
+		"scopes": ["offline_access", "files.read"],
+		"credentialMappings": [
+			{"credential": "access_token", "source": "access_token"},
+			{"credential": "refresh_token", "source": "refresh_token"},
+			{"credential": "instance_url", "source": "instance_url"}
+		],
+		"pkce": true,
+		"protocol": "oauth2",
+		"refresh": {
+			"terminalErrorCodes": ["invalid_grant", "invalid_client"],
+			"missingExpiry": {"lifetime": "2h"},
+			"additionalParameters": {"scope": "offline_access files.read"}
+		}
+	}`, string(methods[0]["oauth2"]))
+	require.JSONEq(t, `{
+		"tokenEndpoint": {"template": "https://login.example.com/{tenant_id}/token"},
+		"clientIDCredential": "client_id",
+		"clientSecretCredential": "client_secret",
+		"scopes": ["https://api.example.com/.default"],
+		"credentialMappings": [{"credential": "access_token", "source": "access_token"}],
+		"terminalErrorCodes": ["invalid_client", "unauthorized_client"]
+	}`, string(methods[2]["clientCredentials"]))
+	require.JSONEq(t, `{"jwtBearer": {
+		"privateKey": {"fromCredential": "private_key"},
+		"issuer": {"fromCredential": "client_id"},
+		"subject": {"fromCredential": "username"},
+		"audience": {"fromCredential": "login_environment", "values": {"": "https://login.example.com", "production": "https://login.example.com", "sandbox": "https://test.example.com"}},
+		"tokenEndpoint": {"fromCredential": "login_environment", "values": {"": "https://login.example.com/token", "production": "https://login.example.com/token", "sandbox": "https://test.example.com/token"}},
+		"lifetime": "2m",
+		"credentialMappings": [{"credential": "access_token", "source": "access_token"}, {"credential": "instance_url", "source": "instance_url"}],
+		"terminalErrorCodes": ["invalid_grant", "invalid_client"],
+		"missingExpiry": {"lifetime": "2h"}
+	}}`, string(methods[4]["serviceAccount"]))
 }
 
 func TestStudioUIArtifactRejectsActiveSVG(t *testing.T) {

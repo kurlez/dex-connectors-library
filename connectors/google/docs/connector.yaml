@@ -5,7 +5,7 @@ metadata:
   displayName: Google Docs
   description: Read Google Docs as bounded Markdown or plain text with their revision, create documents in a Drive folder without duplicates on retry, and replace or append text only at the revision a Flow read.
   company: Google
-  version: v0.21.0
+  version: v0.22.0
 spec:
   provider: google
   codegen:
@@ -86,6 +86,8 @@ spec:
             - {credential: access_token, source: access_token}
             - {credential: refresh_token, source: refresh_token}
           pkce: true
+          refresh:
+            terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
       - id: workspace-domain-delegation
         displayName: Workspace domain-wide delegation
         description: Advanced administrator-only method for a Google Workspace domain; the service account mints delegated user tokens without interactive consent.
@@ -115,6 +117,19 @@ spec:
             - Open the service account > Keys > Add key > Create new key > JSON, download the one-time private key, and paste the complete JSON document into the secret field.
             - Copy the service account OAuth 2 Client ID, then open https://admin.google.com/ac/owl/domainwidedelegation and add that client ID with the displayed documents, drive.file, and drive.metadata.readonly scopes.
             - Enter one managed Workspace user as delegated_user; personal @gmail.com accounts and users outside the administrator's domain cannot use this method.
+        serviceAccount:
+          jwtBearer:
+            keyCredential: service_account_key
+            privateKey: {fromKey: private_key}
+            issuer: {fromKey: client_email}
+            subject: {fromCredential: delegated_user}
+            audience: {fromKey: token_uri}
+            tokenEndpoint: {fromKey: token_uri}
+            scopes: [https://www.googleapis.com/auth/documents, https://www.googleapis.com/auth/drive.file, https://www.googleapis.com/auth/drive.metadata.readonly]
+            lifetime: 1h
+            credentialMappings:
+              - {credential: access_token, source: access_token}
+            terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
   studio:
     setup:
       entrypoint: index.html

@@ -111,7 +111,7 @@ func (driver *CredentialRefreshDriver) refreshOAuthSession(
 		return sdkgo.CredentialRefreshResult[Credentials]{}, err
 	}
 	session.RefreshToken = token.NextRefreshToken(credentials.RefreshToken)
-	return sdkgo.CredentialRefreshResult[Credentials]{Credentials: session, ExpiresAt: driver.now().UTC().Add(nominalSessionLifetime)}, nil
+	return sdkgo.CredentialRefreshResult[Credentials]{Credentials: session, ExpiresAt: sessionExpiry(token, driver.now().UTC())}, nil
 }
 
 func (driver *CredentialRefreshDriver) mintJWTBearerSession(
@@ -149,7 +149,7 @@ func (driver *CredentialRefreshDriver) mintJWTBearerSession(
 	if err != nil {
 		return sdkgo.CredentialRefreshResult[Credentials]{}, err
 	}
-	return sdkgo.CredentialRefreshResult[Credentials]{Credentials: session, ExpiresAt: now.Add(nominalSessionLifetime)}, nil
+	return sdkgo.CredentialRefreshResult[Credentials]{Credentials: session, ExpiresAt: sessionExpiry(token, now)}, nil
 }
 
 // acceptSession checks the granted scope and stores the new token and instance URL.
@@ -170,6 +170,14 @@ func (driver *CredentialRefreshDriver) acceptSession(token oauthtoken.TokenRespo
 	credentials.AccessToken = token.AccessToken
 	credentials.InstanceURL = strings.TrimRight(instanceURL, "/")
 	return credentials, nil
+}
+
+// sessionExpiry follows expires_in when Salesforce sends one, and its nominal session timeout otherwise.
+func sessionExpiry(token oauthtoken.TokenResponse, now time.Time) time.Time {
+	if token.ExpiresIn > 0 {
+		return now.Add(token.ExpiresIn)
+	}
+	return now.Add(nominalSessionLifetime)
 }
 
 func (driver *CredentialRefreshDriver) tokenEndpoint(loginURL string) oauthtoken.TokenEndpoint {

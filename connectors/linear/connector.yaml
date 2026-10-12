@@ -5,7 +5,7 @@ metadata:
   displayName: Linear
   description: "Search and read Linear issues, create issues and comments under client-supplied IDs that every repeated attempt reuses and reads back, move issues through their team's workflow states, assign and label them, find users by email, and receive signed Issue webhooks."
   company: Linear
-  version: v0.21.0
+  version: v0.22.0
 spec:
   provider: linear
   codegen:
@@ -110,6 +110,8 @@ spec:
             - {credential: access_token, source: access_token}
             - {credential: refresh_token, source: refresh_token}
           pkce: true
+          refresh:
+            terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
   studio:
     setup:
       entrypoint: index.html

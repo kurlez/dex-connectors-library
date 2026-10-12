@@ -5,7 +5,7 @@ metadata:
   displayName: Pipedrive
   description: Search, list, read, create, upsert, and update Pipedrive persons, organizations, and deals, with persons upserted by email and deal stages and owners passed through as Pipedrive IDs.
   company: Pipedrive
-  version: v0.21.0
+  version: v0.22.0
 spec:
   provider: pipedrive
   codegen:
@@ -99,6 +99,9 @@ spec:
             - {credential: refresh_token, source: refresh_token}
             - {credential: api_domain, source: api_domain}
           pkce: false
+          tokenEndpointAuthMethod: client_secret_basic
+          refresh:
+            terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
   studio:
     setup:
       entrypoint: index.html

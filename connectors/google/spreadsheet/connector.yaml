@@ -5,7 +5,7 @@ metadata:
   displayName: Google Sheets
   description: Read ranges, find stable keyed rows, and idempotently upsert rows in Google Sheets.
   company: Google
-  version: v0.21.0
+  version: v0.22.0
 spec:
   provider: google
   codegen:
@@ -74,6 +74,8 @@ spec:
         - {credential: access_token, source: access_token}
         - {credential: refresh_token, source: refresh_token}
       pkce: true
+      refresh:
+        terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client]
   studio:
     setup:
       entrypoint: index.html

@@ -5,7 +5,7 @@ metadata:
   displayName: Help Scout
   description: "Search, read, reply to, and update Help Scout Inbox conversations, find customers by email, and receive signed conversation webhooks, keeping Help Scout's own active, pending, closed, and spam statuses."
   company: Help Scout
-  version: v0.21.0
+  version: v0.22.0
 spec:
   provider: helpscout
   codegen:
@@ -57,6 +57,13 @@ spec:
         - "Name the app and enter any HTTPS placeholder, such as https://www.example.com, as its Redirection URL; Help Scout requires one, but the client credentials flow this connector uses never redirects."
         - "Save the app and copy its App ID and App Secret into the fields below; the App Secret is sensitive. Help Scout apps have no scopes, and the Free plan has no API access."
         - "Leave access_token blank: the application obtains a two-day token from https://api.helpscout.net/v2/oauth2/token on its first Help Scout call and renews it before expiry. To revoke access, delete the app under My Apps."
+    clientCredentials:
+      tokenEndpoint: https://api.helpscout.net/v2/oauth2/token
+      clientIDCredential: app_id
+      clientSecretCredential: app_secret
+      credentialMappings:
+        - {credential: access_token, source: access_token}
+      terminalErrorCodes: [invalid_client, unauthorized_client]
   studio:
     setup:
       entrypoint: index.html

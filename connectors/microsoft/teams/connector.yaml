@@ -5,7 +5,7 @@ metadata:
   displayName: Microsoft Teams
   description: Post Microsoft Teams channel messages, thread replies, and chat messages as the signed-in user, each at most once per Step execution, and read a channel message's replies so a Flow can wait for a person's answer.
   company: Microsoft
-  version: v0.21.0
+  version: v0.22.0
 spec:
   provider: microsoft
   codegen:
@@ -75,6 +75,8 @@ spec:
         - {credential: access_token, source: access_token}
         - {credential: refresh_token, source: refresh_token}
       pkce: true
+      refresh:
+        terminalErrorCodes: [invalid_grant, invalid_client, unauthorized_client, interaction_required, consent_required]
   studio:
     setup:
       entrypoint: index.html

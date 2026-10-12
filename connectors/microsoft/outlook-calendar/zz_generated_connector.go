@@ -125,6 +125,28 @@ func NewProjectConnection(project *projectconfig.LoadedProject, connectionName s
 }
 
 func decodeCredentials(contents json.RawMessage) (Credentials, error) {
+	credentials, err := decodeCredentialFields(contents)
+	if err != nil {
+		return Credentials{}, err
+	}
+	return credentials, credentials.Validate()
+}
+
+// UnmarshalSharedCredential decodes the credential of a shared connection, which the credential broker serves
+// without the fields that its host keeps to refresh or mint it. projectconfig decodes shared entries with it.
+func (credentials *Credentials) UnmarshalSharedCredential(contents []byte) error {
+	decoded, err := decodeCredentialFields(contents)
+	if err != nil {
+		return err
+	}
+	if err := decoded.validateSharedCredential(); err != nil {
+		return err
+	}
+	*credentials = decoded
+	return nil
+}
+
+func decodeCredentialFields(contents json.RawMessage) (Credentials, error) {
 	var fields struct {
 		AuthMethodID string `json:"auth_method"`
 		ClientID     string `json:"client_id"`
@@ -146,7 +168,7 @@ func decodeCredentials(contents json.RawMessage) (Credentials, error) {
 		AccessToken:  sdkgo.NewSecretString(fields.AccessToken),
 		RefreshToken: sdkgo.NewSecretString(fields.RefreshToken),
 	}
-	return credentials, credentials.Validate()
+	return credentials, nil
 }
 
 func encodeCredentials(credentials Credentials) (json.RawMessage, error) {
@@ -237,6 +259,29 @@ func (credentials Credentials) Validate() error {
 		}
 		if credentials.ClientSecret.Reveal() == "" {
 			return fmt.Errorf("credential client_secret is required")
+		}
+	default:
+		return fmt.Errorf("credential auth_method is invalid")
+	}
+	return nil
+}
+
+// validateSharedCredential is Validate without the host-kept fields; it requires the access token a host mints.
+func (credentials Credentials) validateSharedCredential() error {
+	switch credentials.AuthMethodID {
+	case "microsoft-oauth":
+		if credentials.ClientID == "" {
+			return fmt.Errorf("credential client_id is required")
+		}
+		if credentials.AccessToken.Reveal() == "" {
+			return fmt.Errorf("credential access_token is required")
+		}
+	case "app-only":
+		if credentials.ClientID == "" {
+			return fmt.Errorf("credential client_id is required")
+		}
+		if credentials.AccessToken.Reveal() == "" {
+			return fmt.Errorf("credential access_token is required")
 		}
 	default:
 		return fmt.Errorf("credential auth_method is invalid")

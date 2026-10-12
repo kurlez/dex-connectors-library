@@ -289,6 +289,309 @@ module from this repository may be required; see
 The Dex Go SDK requirement is a minimum; see
 [Dex versions](versioning-and-releases.md#dex-versions).
 
+## Credential refresh and minting
+
+A host that keeps connections, such as a platform that shares one connection
+between applications, refreshes and mints their access tokens itself. It runs
+no connector code, so each method declares the token requests and how their
+responses map into credentials. A method declares one of three grants:
+
+- an `oauth2` method that maps a refresh token refreshes with it;
+- an `apiKey` method with `clientCredentials` mints with the client
+  credentials grant from its stored client ID and secret;
+- a `serviceAccount` method with `serviceAccount.jwtBearer` mints with a
+  signed JWT bearer assertion.
+
+A method without one, such as a plain API key, keeps its credential as stored,
+so a method whose credential expires must declare its grant. `auth.refreshable`
+is true exactly when some method declares one, and a generated test fails when
+a connector's credential refresh driver refreshes a method without a
+declaration (see
+[Credential refresh agreement](#credential-refresh-agreement)).
+
+Every grant shares these rules:
+
+- A response that carries an OAuth `error` member is a failure, whatever its
+  HTTP status, because some providers report errors with HTTP 200.
+- A failure below HTTP 500 whose code is in `terminalErrorCodes` means the
+  stored grant can never succeed again: the connection needs reauthorization
+  or new client or key material. Every other failure is retried.
+- `credentialMappings` map the response into credential fields by dotted JSON
+  path. A mapped value that the response omits keeps the stored one, so a
+  provider that does not rotate its refresh token keeps it.
+- `missingExpiry` decides the expiry of a token whose response has no
+  `expires_in`: `keep`, the default, stores it without an expiry, so the host
+  replaces it only after the provider rejects it; `{lifetime: 2h}` sets one.
+- `additionalParameters` are fixed, non-secret parameters added to every
+  request. They cannot replace `grant_type`, `refresh_token`, `client_id`,
+  `client_secret`, `assertion`, `client_assertion`, or
+  `client_assertion_type`.
+
+[schema/testdata/token-grants.yaml](../schema/testdata/token-grants.yaml)
+declares each grant.
+
+### Refreshing an OAuth method
+
+An `oauth2` method's `tokenEndpoint`, client credential fields, and
+`credentialMappings` serve both the authorization code exchange and the
+refresh. Two optional fields shape both requests:
+
+- `tokenEndpointAuthMethod` presents the client: `client_secret_post`, the
+  default, sends `client_id` and `client_secret` in the body;
+  `client_secret_basic` sends them as HTTP Basic credentials. A connection
+  without a client secret, which only a method with an optional client secret
+  field can have, sends only `client_id`, as a PKCE public client. A connector
+  whose connection owner chooses the method declares a
+  [value source](#value-sources) instead, such as
+  `{fromSetting: tokenEndpointAuthMethod}` naming an `enum` setting whose
+  values are the two methods.
+- `tokenRequestEncoding` is `form`, the default, or `json` for providers that
+  document only JSON token requests.
+
+A refresh posts `grant_type=refresh_token` and the stored refresh token. The
+optional `refresh` block holds the rules of its response:
+
+```yaml
+oauth2:
+  tokenEndpoint: https://login.example.com/token
+  tokenEndpointAuthMethod: client_secret_basic
+  tokenRequestEncoding: json
+  clientIDCredential: client_id
+  clientSecretCredential: client_secret
+  scopes: [offline_access, files.read]
+  credentialMappings:
+    - {credential: access_token, source: access_token}
+    - {credential: refresh_token, source: refresh_token}
+    - {credential: instance_url, source: instance_url}
+  refresh:
+    terminalErrorCodes: [invalid_grant, invalid_client]
+    missingExpiry: {lifetime: 2h}
+    additionalParameters: {scope: offline_access files.read}
+```
+
+Without `refresh`, a method that maps `refresh_token` refreshes with
+`terminalErrorCodes: [invalid_grant]`, `missingExpiry: keep`, and no
+additional parameters.
+
+The scopes of a refresh response follow RFC 6749 section 5.1:
+
+- a response without `scope` (or a `scopes` array) keeps the granted scopes
+  unchanged;
+- a response that reports scopes that no longer cover the declared `scopes`
+  needs reauthorization, as a terminal error code does. Providers that never
+  report `offline_access` need not report it.
+
+A method that stores several refresh tokens, such as a bot token and a user
+token, lists one grant for each, and the grants refresh independently:
+
+- each grant's response sets the expiry of the tokens it maps;
+- a host refreshes a grant when that grant's own token nears expiry, never
+  because another grant does, since every needless rotation of a single-use
+  refresh token widens the window in which a lost response loses the token;
+- a grant whose refresh token is blank is skipped;
+- the connection reports the earliest expiry of its tokens.
+
+A grant with `grantedScopes: userScopes` checks the scopes its response reports
+against `userScopes` instead of `scopes`:
+
+```yaml
+refresh:
+  grants:
+    - refreshTokenCredential: bot_refresh_token
+      credentialMappings:
+        - {credential: bot_token, source: access_token}
+        - {credential: bot_refresh_token, source: refresh_token}
+    - refreshTokenCredential: user_refresh_token
+      grantedScopes: userScopes
+      credentialMappings:
+        - {credential: user_token, source: access_token}
+        - {credential: user_refresh_token, source: refresh_token}
+```
+
+### Minting with client credentials
+
+An `apiKey` method whose access token comes from the OAuth client credentials
+grant declares `clientCredentials`. It posts `grant_type=client_credentials`
+and the space-separated `scopes`, and presents the client as
+`tokenEndpointAuthMethod` says. `terminalErrorCodes` defaults to
+`[invalid_client]`.
+
+```yaml
+clientCredentials:
+  tokenEndpoint: {template: "https://login.example.com/{tenant_id}/token"}
+  clientIDCredential: client_id
+  clientSecretCredential: client_secret
+  scopes: [https://api.example.com/.default]
+  credentialMappings:
+    - {credential: access_token, source: access_token}
+  terminalErrorCodes: [invalid_client, unauthorized_client]
+```
+
+### Minting with a JWT bearer assertion
+
+A `serviceAccount` method declares `serviceAccount.jwtBearer`. The host signs
+an RS256 assertion (RFC 7523) with `privateKey`, sets `iss`, `sub` (when
+`subject` is declared), `aud`, `iat`, `exp` after `lifetime`, and the
+space-separated `scope` claim (when `scopes` is declared), and posts it as
+`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` to `tokenEndpoint`
+without client authentication. `credentialCopies` set credential fields from
+other credential fields after each mint. `terminalErrorCodes` defaults to
+`[invalid_grant]`.
+
+```yaml
+serviceAccount:
+  jwtBearer:
+    keyCredential: service_account_key
+    privateKey: {fromKey: private_key}
+    issuer: {fromKey: client_email}
+    subject: {fromCredential: delegated_user}
+    audience: {fromKey: token_uri}
+    tokenEndpoint: {fromKey: token_uri}
+    scopes: [https://api.example.com/mail.read]
+    lifetime: 1h
+    credentialMappings:
+      - {credential: access_token, source: access_token}
+    credentialCopies:
+      - {credential: primary_email, fromCredential: delegated_user}
+```
+
+### Host-kept credentials
+
+A host that keeps a shared connection keeps the credential fields that only
+its token requests use, and serves the credential to applications without
+them, so code that an application runs can never refresh or mint the shared
+credential or rotate a single-use refresh token away from the other
+applications. The fields follow from the declarations, with no field of their
+own:
+
+- an `oauth2` method's `clientSecretCredential`, every `refresh.grants`
+  `refreshTokenCredential`, and every field that a credential mapping of the
+  method or of a grant fills from a `refresh_token` member, such as
+  `refresh_token` or `authed_user.refresh_token`;
+- a `clientCredentials` grant's `clientSecretCredential`;
+- a `serviceAccount.jwtBearer` grant's `keyCredential` and the field that its
+  `privateKey` names with `{fromCredential}`.
+
+A `jwtBearer` `privateKey` is therefore `{fromKey}` or `{fromCredential}` of a
+`secretString` field, without `values`, and no `credentialCopies` entry copies
+a host-kept field. `schema.HostKeptCredentials` implements the rule, and each
+release lists the result as `hostKeptCredentials` for every method under
+`authMethods` in `connector-release.json`, which a host reads instead of
+deriving the fields again. The host-kept credentials of a method are part of
+the [connection contract](versioning-and-releases.md#connection-compatibility).
+
+For a connector whose host keeps some field, `connectorctl generate` adds
+`UnmarshalSharedCredential` to the generated `Credentials`. The Connector SDK
+decodes a shared entry's credential with it (see
+[Shared connections](../sdkgo/projectconfig/README.md#host-kept-secrets)). It
+requires every field that `Validate` requires except the host-kept ones, and
+the access token that a `clientCredentials` or `jwtBearer` grant mints, because
+an application of a shared connection cannot mint it. It accepts host-kept
+fields that a broker still sends.
+
+The generated `zz_generated_shared_credential_test.go` checks the connector:
+
+- each method's sample credential decodes without its host-kept fields and with
+  them, `Validate` still requires a required host-kept field, and every other
+  required field stays required;
+- it type-checks every non-test package of the connector module and fails when
+  code passes a value that holds `Credentials` to `reflect`, `fmt`, `log`,
+  `log/slog`, or an encoding package, or reads a host-kept field of
+  `Credentials` anywhere except these three places:
+  - the generated codec in `zz_generated_connector.go`;
+  - the `CredentialRefreshDriver` methods `Refresh` and `RefreshRequired`;
+  - the unexported functions and methods of the connector's root package that
+    `Refresh` or `RefreshRequired` use, directly or through each other.
+
+A shared entry never calls either driver method, so with these checks an
+application of a shared connection calls its provider with the access token
+alone. `go test` of the connector runs the test, and `connectorctl generate
+--check` keeps it current.
+
+### Value sources
+
+`tokenEndpointAuthMethod`, `tokenEndpoint` of `clientCredentials`, and every
+`jwtBearer` value except the lists name where a host finds the value. They
+share one value source type with the OAuth endpoints and `scopes` of
+[Endpoints and scopes from connection settings](#endpoints-and-scopes-from-connection-settings).
+Every `oauth2` field (the endpoints, `scopes`, `tokenEndpointAuthMethod`, the OIDC
+endpoints and the credential derivation endpoints) accepts only a literal or
+`{fromSetting}`, without `values`, because those are the forms hosts read; the
+other forms below belong to `clientCredentials` and `jwtBearer`. Each is one of:
+
+- a literal string;
+- `{fromCredential: <field>}`, a credential field of the method;
+- `{fromSetting: <field>}`, a `spec.configuration` field or one of the
+  method's `configuration.fields`; for an endpoint, a required `url` field;
+- `{fromKey: <member>}`, a top-level string member of the JSON key in
+  `keyCredential`;
+- `{template: "https://host/path/{name}"}`, whose placeholders each name a
+  credential field or setting. The host inserts each value path-escaped, and
+  the scheme and host are fixed.
+
+`values` translates the value of `fromCredential`, `fromSetting`, or `fromKey`,
+such as a login environment into its server; the key `""` translates a blank
+value, and an untranslated value cannot be resolved:
+
+```yaml
+audience:
+  fromCredential: login_environment
+  values: {"": https://login.example.com, production: https://login.example.com, sandbox: https://test.example.com}
+```
+
+A `tokenEndpointAuthMethod` source is not a template, and every value it can
+resolve to, a literal, a translation, or the values of the `enum` field or
+setting it names, is `client_secret_post` or `client_secret_basic`. A literal
+or translated token endpoint is an absolute HTTPS URL. A host checks
+an endpoint that it reads from a credential, setting, or key before it sends a
+secret there. Release metadata writes a literal as a JSON string, every other
+source as an object, and `missingExpiry` as `"keep"` or `{"lifetime": "2h"}`.
+
+### Credential refresh agreement
+
+A connector keeps its hand-written `CredentialRefreshDriver` for applications
+that refresh in process, so its declarations and its driver must agree.
+`connectorctl generate` writes `zz_generated_credential_refresh_test.go` beside
+every manifest that declares a grant. The test runs the driver against a stub
+token endpoint, through the HTTP client it passes to
+`NewCredentialRefreshDriver`, and for every declared grant checks that:
+
+- the driver sends one request to the declared token endpoint, with the
+  declared encoding, client authentication, grant parameters, additional
+  parameters, and, for a JWT bearer grant, an assertion signed by the stored
+  key with the declared claims;
+- a successful response changes exactly the credentials that
+  `credentialMappings` and `credentialCopies` name, and the expiry follows
+  `expires_in`;
+- a response without `refresh_token` keeps the stored refresh token;
+- an error code is terminal exactly when the grant declares it, among the
+  declared codes and the common RFC 6749 and provider codes;
+- a response without `expires_in` takes the declared `missingExpiry`
+  lifetime, or, for `keep`, never needs reauthorization;
+- a connection without its optional client secret sends a public client
+  request, or the driver refuses it with a reauthorization error.
+
+It also checks that, for a method that declares no grant, the driver's
+`RefreshRequired` is false with no expiry and with a past one, and `Refresh`
+sends no token request, so a minting method cannot drop its declaration
+unnoticed. `go test` of the connector runs it in pull requests, before
+a release, and before a release candidate, and `connectorctl generate --check`
+fails when it is stale.
+
+A driver may check more than the declarations, such as the scopes a response
+reports or a provider-owned API domain. When such a check rejects the test's
+sample values, `testdata/credential-refresh-samples.json` overrides them for
+every grant (`"*"`), a method (its ID, or `spec.auth`), or one grant (the test
+case name, such as `"spec.auth refresh bot_refresh_token"`):
+
+```json
+{"*": {"response": {"api_domain": "https://example.pipedrive.com"}}}
+```
+
+A driver whose constructor takes a connection setting that a declaration reads
+gets it from `newCredentialRefreshDriverWithSettings(httpClient, settings)`,
+which the connector writes in a test file of its external test package.
+
 ## Studio setup bundle
 
 A connector with a provider-specific setup experience declares `spec.studio`:

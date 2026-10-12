@@ -5,7 +5,7 @@ metadata:
   displayName: Microsoft Entra ID
   description: Read and list Microsoft Entra ID user accounts, create, disable, and enable them, revoke their sign-in sessions, and add or remove group members through Microsoft Graph, converging instead of duplicating when a Step repeats.
   company: Microsoft
-  version: v0.21.0
+  version: v0.22.0
 spec:
   provider: microsoft
   codegen:
@@ -71,6 +71,14 @@ spec:
             - Open API permissions > Add a permission > Microsoft Graph > Application permissions and add User.Read.All, User.Create, User.EnableDisableAccount.All, User.RevokeSessions.All, and GroupMember.ReadWrite.All. Every one requires admin consent, so a Privileged Role Administrator or Global Administrator chooses Grant admin consent for your tenant. Leave out permissions for operations your Flows never use; the connector README lists which operation needs which.
             - Open Certificates & secrets > Client secrets > New client secret, choose an expiry, and copy the Value shown once into client_secret. Renew it before it expires; to revoke access, delete the secret or the app registration.
             - To disable, enable, or revoke sessions for accounts that hold administrator roles, also assign the app the Privileged Authentication Administrator role under Entra ID > Roles & admins; without it Microsoft Graph answers 403 for those accounts.
+        clientCredentials:
+          tokenEndpoint: {template: "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"}
+          clientIDCredential: client_id
+          clientSecretCredential: client_secret
+          scopes: [https://graph.microsoft.com/.default]
+          credentialMappings:
+            - {credential: access_token, source: access_token}
+          terminalErrorCodes: [invalid_request, invalid_grant, unauthorized_client, invalid_client, unsupported_grant_type, invalid_resource, interaction_required, consent_required, invalid_scope]
       - id: microsoft-oauth
         displayName: Microsoft OAuth as an administrator
         description: Interactive consent by one Microsoft Entra administrator; Dex refreshes the one-hour access token with Microsoft's rotating refresh token, and every operation runs with that administrator's directory roles.
@@ -115,6 +123,9 @@ spec:
             - {credential: access_token, source: access_token}
             - {credential: refresh_token, source: refresh_token}
           pkce: true
+          refresh:
+            terminalErrorCodes: [invalid_request, invalid_grant, unauthorized_client, invalid_client, unsupported_grant_type, invalid_resource, interaction_required, consent_required, invalid_scope]
+            additionalParameters: {scope: offline_access User.Read.All User.Create User.EnableDisableAccount.All User.RevokeSessions.All GroupMember.ReadWrite.All}
   operations:
     - name: getUser
       goName: GetUser

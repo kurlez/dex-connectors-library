@@ -1,0 +1,181 @@
+apiVersion: connectors.dex.dev/v1alpha1
+kind: Connector
+metadata:
+  name: token-grants-fixture
+  displayName: Token Grants Fixture
+  description: Deterministic fixture for the refresh and minting declarations of every method type.
+  company: Example
+  version: v0.1.0
+spec:
+  provider: example
+  codegen: {go: {package: tokengrants}}
+  configuration:
+    fields:
+      - {name: tenantId, goName: TenantID, type: string, description: Directory tenant of app-only access., required: false}
+  auth:
+    refreshable: true
+    defaultMethod: user-oauth
+    methods:
+      - id: user-oauth
+        displayName: User OAuth
+        description: Authorize one user.
+        type: oauth2
+        connectionKind: example-user-oauth
+        fields:
+          - {name: client_id, goName: ClientID, type: string, description: OAuth client ID., required: true}
+          - {name: client_secret, goName: ClientSecret, type: secretString, description: OAuth client secret., required: true}
+          - {name: access_token, goName: AccessToken, type: secretString, description: Access token., required: true}
+          - {name: refresh_token, goName: RefreshToken, type: secretString, description: Refresh token., required: true}
+          - {name: instance_url, goName: InstanceURL, type: string, description: Instance URL., required: false}
+        guide:
+          startURL: https://example.com/apps
+          steps: [Create an OAuth application.]
+        oauth2:
+          authorizationEndpoint: https://login.example.com/authorize
+          tokenEndpoint: https://login.example.com/token
+          tokenEndpointAuthMethod: client_secret_basic
+          tokenRequestEncoding: json
+          clientIDCredential: client_id
+          clientSecretCredential: client_secret
+          scopes: [offline_access, files.read]
+          credentialMappings:
+            - {credential: access_token, source: access_token}
+            - {credential: refresh_token, source: refresh_token}
+            - {credential: instance_url, source: instance_url}
+          pkce: true
+          refresh:
+            terminalErrorCodes: [invalid_grant, invalid_client]
+            missingExpiry: {lifetime: 2h}
+            additionalParameters: {scope: offline_access files.read}
+      - id: bot-oauth
+        displayName: Bot OAuth
+        description: Install a bot with a user token.
+        type: oauth2
+        connectionKind: example-bot-oauth
+        fields:
+          - {name: client_id, goName: ClientID, type: string, description: OAuth client ID., required: true}
+          - {name: client_secret, goName: ClientSecret, type: secretString, description: OAuth client secret., required: true}
+          - {name: bot_token, goName: BotToken, type: secretString, description: Bot token., required: true}
+          - {name: bot_refresh_token, goName: BotRefreshToken, type: secretString, description: Bot refresh token., required: false}
+          - {name: user_token, goName: UserToken, type: secretString, description: User token., required: true}
+          - {name: user_refresh_token, goName: UserRefreshToken, type: secretString, description: User refresh token., required: false}
+        guide:
+          startURL: https://example.com/apps
+          steps: [Create a bot application.]
+        oauth2:
+          authorizationEndpoint: https://login.example.com/authorize
+          tokenEndpoint: https://login.example.com/token
+          clientIDCredential: client_id
+          clientSecretCredential: client_secret
+          scopes: [chat.write]
+          userScopes: [history.read]
+          credentialMappings:
+            - {credential: bot_token, source: access_token}
+            - {credential: bot_refresh_token, source: refresh_token}
+            - {credential: user_token, source: authed_user.access_token}
+            - {credential: user_refresh_token, source: authed_user.refresh_token}
+          pkce: false
+          refresh:
+            missingExpiry: keep
+            grants:
+              - refreshTokenCredential: bot_refresh_token
+                credentialMappings:
+                  - {credential: bot_token, source: access_token}
+                  - {credential: bot_refresh_token, source: refresh_token}
+              - refreshTokenCredential: user_refresh_token
+                grantedScopes: userScopes
+                credentialMappings:
+                  - {credential: user_token, source: access_token}
+                  - {credential: user_refresh_token, source: refresh_token}
+      - id: app-only
+        displayName: App-only
+        description: Use the application's own permissions in one tenant.
+        type: apiKey
+        connectionKind: example-app-only
+        fields:
+          - {name: tenant_id, goName: TenantIDCredential, type: string, description: Directory tenant., required: true}
+          - {name: client_id, goName: ClientID, type: string, description: OAuth client ID., required: true}
+          - {name: client_secret, goName: ClientSecret, type: secretString, description: OAuth client secret., required: true}
+          - {name: access_token, goName: AccessToken, type: secretString, description: Minted access token., required: false}
+        guide:
+          startURL: https://example.com/apps
+          steps: [Grant the application permissions.]
+        clientCredentials:
+          tokenEndpoint: {template: "https://login.example.com/{tenant_id}/token"}
+          clientIDCredential: client_id
+          clientSecretCredential: client_secret
+          scopes: [https://api.example.com/.default]
+          credentialMappings:
+            - {credential: access_token, source: access_token}
+          terminalErrorCodes: [invalid_client, unauthorized_client]
+      - id: delegation
+        displayName: Domain delegation
+        description: Impersonate one user with a service account key.
+        type: serviceAccount
+        connectionKind: example-delegation
+        fields:
+          - {name: service_account_key, goName: ServiceAccountKey, type: secretString, description: Service account JSON key., required: true}
+          - {name: delegated_user, goName: DelegatedUser, type: string, description: User to impersonate., required: true}
+          - {name: access_token, goName: AccessToken, type: secretString, description: Minted access token., required: false}
+          - {name: primary_email, goName: PrimaryEmail, type: string, description: Mailbox of the delegated user., required: false}
+        guide:
+          startURL: https://example.com/service-accounts
+          steps: [Create a key and delegate it.]
+        serviceAccount:
+          jwtBearer:
+            keyCredential: service_account_key
+            privateKey: {fromKey: private_key}
+            issuer: {fromKey: client_email}
+            subject: {fromCredential: delegated_user}
+            audience: {fromKey: token_uri}
+            tokenEndpoint: {fromKey: token_uri}
+            scopes: [https://api.example.com/mail.read]
+            lifetime: 1h
+            credentialMappings:
+              - {credential: access_token, source: access_token}
+            credentialCopies:
+              - {credential: primary_email, fromCredential: delegated_user}
+      - id: jwt-bearer
+        displayName: JWT bearer
+        description: Sign assertions with a certificate key.
+        type: serviceAccount
+        connectionKind: example-jwt-bearer
+        fields:
+          - {name: client_id, goName: ClientID, type: string, description: Consumer key., required: true}
+          - {name: username, goName: Username, type: string, description: User to act as., required: true}
+          - {name: private_key, goName: PrivateKey, type: secretString, description: PEM private key., required: true}
+          - {name: login_environment, goName: LoginEnvironment, type: enum, enum: [production, sandbox], description: Login server., required: false}
+          - {name: access_token, goName: AccessToken, type: secretString, description: Minted access token., required: false}
+          - {name: instance_url, goName: InstanceURL, type: string, description: Instance URL., required: false}
+        guide:
+          startURL: https://example.com/certificates
+          steps: [Upload a certificate.]
+        serviceAccount:
+          jwtBearer:
+            privateKey: {fromCredential: private_key}
+            issuer: {fromCredential: client_id}
+            subject: {fromCredential: username}
+            audience:
+              fromCredential: login_environment
+              values: {"": https://login.example.com, production: https://login.example.com, sandbox: https://test.example.com}
+            tokenEndpoint:
+              fromCredential: login_environment
+              values: {"": https://login.example.com/token, production: https://login.example.com/token, sandbox: https://test.example.com/token}
+            lifetime: 2m
+            credentialMappings:
+              - {credential: access_token, source: access_token}
+              - {credential: instance_url, source: instance_url}
+            terminalErrorCodes: [invalid_grant, invalid_client]
+            missingExpiry: {lifetime: 2h}
+  operations:
+    - name: getThing
+      goName: GetThing
+      inputType: GetThingInput
+      outputType: GetThingOutput
+      kind: query
+      description: Get one thing.
+      idempotency: none
+      branches:
+        - {id: found, goName: Found, description: The thing was found.}
+        - {id: defect, goName: Defect, description: The request was invalid., optional: true}
+      execution: {executeMethodTimeout: 30s, durability: async, retry: {initialInterval: 1s, backoffCoefficient: 2, maximumInterval: 30s, maximumAttempts: 5, totalDuration: 2m}}

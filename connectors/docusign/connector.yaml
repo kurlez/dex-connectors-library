@@ -5,7 +5,7 @@ metadata:
   displayName: DocuSign eSignature
   description: "Send DocuSign eSignature envelopes from templates, guarded against duplicates on retry, read envelope and recipient status, void an envelope as compensation, record the signed combined PDF's digest outside Dex payloads, and receive HMAC-verified Connect envelope-completed, envelope-declined, and envelope-voided events."
   company: DocuSign
-  version: v0.21.0
+  version: v0.22.0
 spec:
   provider: docusign
   codegen:
@@ -92,6 +92,9 @@ spec:
             - {credential: refresh_token, source: refresh_token}
           # DocuSign spells the PKCE method s256; a confidential client needs no PKCE, so none is sent.
           pkce: false
+          tokenEndpointAuthMethod: client_secret_basic
+          refresh:
+            terminalErrorCodes: [invalid_request, invalid_client, invalid_grant, unauthorized_client]
       - id: docusign-developer-oauth
         displayName: Developer account
         description: "For building and testing: Dex signs in through account-d.docusign.com, the DocuSign developer environment, whose envelopes are not legally binding."
@@ -116,6 +119,9 @@ spec:
             - {credential: access_token, source: access_token}
             - {credential: refresh_token, source: refresh_token}
           pkce: false
+          tokenEndpointAuthMethod: client_secret_basic
+          refresh:
+            terminalErrorCodes: [invalid_request, invalid_client, invalid_grant, unauthorized_client]
   triggers:
     - name: envelopeEventReceived
       goName: EnvelopeEventReceived

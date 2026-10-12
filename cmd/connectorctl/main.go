@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -82,6 +83,16 @@ type connectorReleaseArtifact struct {
 	SourceSHA      string              `json:"sourceSha"`
 	ManifestSHA256 string              `json:"manifestSha256"`
 	UI             *connectorUIRelease `json:"ui,omitempty"`
+	// AuthMethods lists every authentication method with the credential fields that a host keeps from applications.
+	// A host reads them here instead of deriving them from the manifest again.
+	AuthMethods []connectorReleaseAuthMethod `json:"authMethods"`
+}
+
+type connectorReleaseAuthMethod struct {
+	// ID is the method ID, empty for a manifest whose spec.auth is its only method.
+	ID string `json:"id"`
+	// HostKeptCredentials are schema.HostKeptCredentials of the method, an empty list when the host keeps none.
+	HostKeptCredentials []string `json:"hostKeptCredentials"`
 }
 
 type connectorUIRelease struct {
@@ -127,6 +138,13 @@ func releaseArtifact(args []string) error {
 	artifact := connectorReleaseArtifact{
 		ConnectorID: manifest.Metadata.Name, Manifest: manifest, ModulePath: *modulePath,
 		Version: *version, Tag: *tag, SourceSHA: *sourceSHA, ManifestSHA256: manifestDigest,
+	}
+	for _, method := range manifest.Spec.Auth.AuthMethods() {
+		hostKept := schema.HostKeptCredentials(method)
+		if hostKept == nil {
+			hostKept = []string{}
+		}
+		artifact.AuthMethods = append(artifact.AuthMethods, connectorReleaseAuthMethod{ID: method.ID, HostKeptCredentials: hostKept})
 	}
 	if (*uiArtifactPath == "") != (*uiDigestPath == "") {
 		return errors.New("ui-artifact and ui-digest must be provided together")
@@ -367,7 +385,23 @@ func generate(args []string) error {
 	if err != nil {
 		return err
 	}
+	refreshAgreementFiles, err := generatedRefreshAgreementFiles(args[0], manifest)
+	if err != nil {
+		return err
+	}
+	sharedCredentialFiles, err := generatedSharedCredentialFiles(args[0], manifest)
+	if err != nil {
+		return err
+	}
+	for path, contents := range refreshAgreementFiles {
+		mockFiles[path] = contents
+	}
+	for path, contents := range sharedCredentialFiles {
+		mockFiles[path] = contents
+	}
 	stale := staleMockFiles(args[0], manifest)
+	staleRefreshAgreement := staleRefreshAgreementFiles(args[0], manifest)
+	staleSharedCredential := staleSharedCredentialFiles(args[0], manifest)
 	if check {
 		current, readErr := os.ReadFile(output)
 		if readErr != nil {
@@ -379,12 +413,18 @@ func generate(args []string) error {
 		if len(stale) > 0 {
 			return fmt.Errorf("generated mock package is stale because the manifest declares no mocks: %s", stale[0])
 		}
+		if len(staleRefreshAgreement) > 0 {
+			return fmt.Errorf("generated credential refresh agreement test is stale because the manifest declares no token grants: %s", staleRefreshAgreement[0])
+		}
+		if len(staleSharedCredential) > 0 {
+			return fmt.Errorf("generated shared credential test is stale because the manifest keeps no credentials on the host: %s", staleSharedCredential[0])
+		}
 		return checkGeneratedFiles(mockFiles)
 	}
 	if err := os.WriteFile(output, generated, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", output, err)
 	}
-	for _, path := range stale {
+	for _, path := range slices.Concat(stale, staleRefreshAgreement, staleSharedCredential) {
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("remove stale %s: %w", path, err)
 		}
