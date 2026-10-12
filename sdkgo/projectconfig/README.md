@@ -385,6 +385,41 @@ be loopback/private IP, `localhost`, `host.docker.internal`, or a Kubernetes
 `.svc.cluster.local` service. This opt-in cannot silently select ordinary AWS
 storage without an explicit local endpoint. Hosted deployments omit both.
 
+## Local development with Dex Web
+
+Under `dexcli dev`, Dex Web stores the connections that a developer configures
+in `connections.json` (and operation settings in `use-configurations.json`
+beside it), in `$HOME/.dex/connectors` or the `--connector-config-dir`
+directory. The application needs no `DEX_PROJECT_*` variables, no S3-compatible
+store and no conversion step. It starts with the launch command that Dex Web
+shows:
+
+```bash
+DEX_CONNECTOR_CONFIG_FILE="$HOME/.dex/connectors/connections.json" <your-app-command>
+```
+
+`LoadFromEnvironment` then reads those files and serves the same project
+protocol as a hosted store, so `NewProjectConnection` and every other
+interface of this package behave identically. Setting both
+`DEX_CONNECTOR_CONFIG_FILE` and a `DEX_PROJECT_*` variable is an error. Both
+files must be regular files with mode `0600`, as Dex Web writes them. This
+needs `sdkgo` v0.28.0 or later; connectors need no change.
+
+- Settings, Trigger bindings and operation settings are read once at startup,
+  so changing them in Dex Web needs an application restart.
+- Credentials are read again before each provider call, so reauthorizing in
+  Dex Web takes effect on the next call without a restart.
+- Dex Web does not refresh credentials. When a refreshable connector refreshes
+  one, the application writes the new credential back to `connections.json`
+  while that file still holds the credential it read, so a restart or Dex Web
+  keeps the current refresh token. A newer credential that Dex Web saved wins.
+  Run one application per directory: the write-back does not coordinate across
+  processes.
+- Trigger inboxes persist in `trigger-inboxes/` beside `connections.json`, so
+  acknowledged events survive a restart.
+- The connections file holds plaintext secrets for local development. Never
+  commit it or use it outside a developer machine.
+
 Tests load a project from an in-memory `ObjectStore` with
 `projectconfigtest.LoadProject(ctx, objects, scope, reference)`, so they can
 serve shared entries and relayed Triggers from an in-process broker without
