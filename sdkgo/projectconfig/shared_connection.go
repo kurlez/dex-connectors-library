@@ -30,7 +30,7 @@ const (
 type sharedConnectionsConfig struct {
 	// configuration is the loaded document: its credentialBroker and its shared entries.
 	configuration Configuration
-	// configurations rereads the document after CONNECTION_NOT_SELECTED.
+	// configurations rereads the document's credentialBroker to renew the scope token.
 	configurations *ConfigurationStore
 	httpClient     *http.Client
 	now            func() time.Time
@@ -53,10 +53,8 @@ func newSharedConnections(config *sharedConnectionsConfig) *sharedConnections {
 		}
 		key := ConnectionKey{ConnectorID: connection.ConnectorID, ConnectionName: connection.ConnectionName}
 		shared.entries[key] = &sharedConnection{
-			broker: broker, configurations: config.configurations, key: key, now: config.now,
-			readSlot: make(chan struct{}, 1), sharedConnectionID: connection.SharedConnectionID,
+			broker: broker, now: config.now, readSlot: make(chan struct{}, 1), sharedConnectionID: connection.SharedConnectionID,
 			issuedByCall: map[string]*list.Element{}, issuedOrder: list.New(),
-			canFollowSelection: config.configuration.Scope.Kind == scopeKindPreview,
 		}
 	}
 	return shared
@@ -64,18 +62,15 @@ func newSharedConnections(config *sharedConnectionsConfig) *sharedConnections {
 
 // sharedConnection caches the broker's credential for one entry. It never touches connections/* or refreshes.
 type sharedConnection struct {
-	broker         *credentialBroker
-	configurations *ConfigurationStore
-	key            ConnectionKey
-	now            func() time.Time
-	// canFollowSelection is true for a Preview document, which may select another connection. A Live document is frozen.
-	canFollowSelection bool
+	broker *credentialBroker
+	now    func() time.Time
+	// sharedConnectionID is the loaded document's selection, which the process keeps until it ends.
+	sharedConnectionID string
 	// readSlot admits one read at a time; waiters honor their own context and then reuse its result.
 	readSlot chan struct{}
 
-	mutex              sync.Mutex
-	sharedConnectionID string
-	cached             *brokerCredential
+	mutex  sync.Mutex
+	cached *brokerCredential
 	// nextReadNotBefore defers the next read of a cached credential.
 	nextReadNotBefore time.Time
 	recentFailure     error
@@ -156,62 +151,26 @@ func (connection *sharedConnection) credentialAfterRejection(ctx context.Context
 	return credential, nil
 }
 
-// read asks the broker. CONNECTION_NOT_SELECTED rereads the document once and follows a changed selection.
+// read asks the broker. CONNECTION_NOT_SELECTED is terminal: the process keeps the selection it was loaded with, so it
+// never pairs another connection's credential with this entry's settings.
 func (connection *sharedConnection) read(ctx context.Context, rejectedRevision uint64) (brokerCredential, error) {
-	hasRereadConfiguration := false
-	for {
-		answer, err := connection.broker.read(ctx, connection.currentSharedConnectionID(), rejectedRevision)
-		if err != nil {
-			return brokerCredential{}, err
-		}
-		switch answer.status {
-		case credentialBrokerReady:
-			if isExpired(answer.credential, connection.now()) {
-				return brokerCredential{}, fmt.Errorf("%w: the credential has already expired", ErrCredentialBrokerUnavailable)
-			}
-			return connection.remember(answer.credential), nil
-		case credentialBrokerReauthorizationRequired:
-			connection.forget()
-			return brokerCredential{}, ErrReauthorizationRequired
-		}
-		connection.forget()
-		if !connection.canFollowSelection {
-			return brokerCredential{}, fmt.Errorf("%w: a Live configuration is frozen and cannot select another connection", ErrConnectionNotSelected)
-		}
-		if hasRereadConfiguration {
-			return brokerCredential{}, ErrConnectionNotSelected
-		}
-		hasRereadConfiguration = true
-		isSelectionChanged, err := connection.rereadSharedConnectionID(ctx)
-		if err != nil {
-			return brokerCredential{}, fmt.Errorf("%w: rereading the configuration document: %w", ErrConnectionNotSelected, err)
-		}
-		if !isSelectionChanged {
-			return brokerCredential{}, ErrConnectionNotSelected
-		}
-		rejectedRevision = 0
-	}
-}
-
-// rereadSharedConnectionID takes only this entry's sharedConnectionId from the current document.
-func (connection *sharedConnection) rereadSharedConnectionID(ctx context.Context) (bool, error) {
-	configuration, _, err := connection.configurations.ReadConfiguration(ctx)
+	answer, err := connection.broker.read(ctx, connection.sharedConnectionID, rejectedRevision)
 	if err != nil {
-		return false, err
+		return brokerCredential{}, err
 	}
-	for _, entry := range configuration.Connections {
-		if entry.ConnectorID != connection.key.ConnectorID || entry.ConnectionName != connection.key.ConnectionName {
-			continue
+	switch answer.status {
+	case credentialBrokerReady:
+		if isExpired(answer.credential, connection.now()) {
+			return brokerCredential{}, fmt.Errorf("%w: the credential has already expired", ErrCredentialBrokerUnavailable)
 		}
-		connection.mutex.Lock()
-		defer connection.mutex.Unlock()
-		if entry.SharedConnectionID == "" || entry.SharedConnectionID == connection.sharedConnectionID {
-			return false, nil
-		}
-		connection.sharedConnectionID = entry.SharedConnectionID
-		return true, nil
+		return connection.remember(answer.credential), nil
+	case credentialBrokerReauthorizationRequired:
+		connection.forget()
+		return brokerCredential{}, ErrReauthorizationRequired
+	default:
+		connection.forget()
+		return brokerCredential{}, ErrConnectionNotSelected
 	}
-	return false, nil
 }
 
 // remember caches a READY credential and returns it with its receipt time.
@@ -256,12 +215,6 @@ func (connection *sharedConnection) unexpiredCredential() (brokerCredential, boo
 		return brokerCredential{}, false
 	}
 	return *connection.cached, true
-}
-
-func (connection *sharedConnection) currentSharedConnectionID() string {
-	connection.mutex.Lock()
-	defer connection.mutex.Unlock()
-	return connection.sharedConnectionID
 }
 
 func (connection *sharedConnection) deferNextRead(interval time.Duration) {

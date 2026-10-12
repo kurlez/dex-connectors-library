@@ -131,27 +131,3 @@ func TestRememberedCallsExpireAfterTenMinutes(t *testing.T) {
 	require.Equal(t, requests+1, fixture.broker.requestCount())
 	require.Equal(t, float64(2), rejectedRevision(fixture.broker.request(requests)))
 }
-
-func TestRejectionOfACallThatUsedAnotherSelectionServesTheCurrentSelection(t *testing.T) {
-	fixture := newPreviewFixture(t, readyReply(1, "first", epoch, time.Minute))
-	resolver := fixture.resolver(t)
-	_, err := resolver.Resolve(callContext("call-a"))
-	require.NoError(t, err)
-	fixture.clock.Advance(50 * time.Second)
-	fixture.writeConfiguration(t, 1, "conn-9")
-	fixture.broker.respondWith(func(request brokerRequest) brokerReply {
-		if request.body["sharedConnectionId"] == "conn-9" {
-			return readyReply(1, "other", fixture.clock.Now(), time.Hour)
-		}
-		return statusReply("CONNECTION_NOT_SELECTED")
-	})
-	value, err := resolver.Resolve(callContext("call-b"))
-	require.NoError(t, err)
-	require.Equal(t, "other", value.Access)
-	requests := fixture.broker.requestCount()
-
-	value, err = resolver.ResolveAfterRejection(callContext("call-a"), forbiddenDriver{t})
-	require.NoError(t, err)
-	require.Equal(t, "other", value.Access)
-	require.Equal(t, requests, fixture.broker.requestCount(), "revision 1 of conn-7 is not revision 1 of conn-9")
-}

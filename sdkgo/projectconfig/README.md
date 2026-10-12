@@ -94,7 +94,7 @@ so applications built before `v1alpha3` still read it.
   application environment values. `ConfigurationStore.CreateCredentialBrokerToken`
   writes it. The application role needs read access to that object like any
   other application secret, and to `configuration/head` for scope token
-  renewal and the Preview reread below.
+  renewal.
 
 ### Wire contract
 
@@ -114,7 +114,7 @@ broker answers HTTP 200 with a JSON object; unknown members are ignored:
 | Member | Meaning |
 | --- | --- |
 | `status` | `READY`, `REAUTHORIZATION_REQUIRED` or `CONNECTION_NOT_SELECTED`. |
-| `credential` | `READY` only. The complete credential object that the connector's generated `decodeCredentials` accepts, at most 64 KiB. |
+| `credential` | `READY` only. The connection's credential object without its host-kept fields (see [Host-kept secrets](#host-kept-secrets)), at most 64 KiB. |
 | `revision` | `READY` only. A positive integer that changes whenever the credential changes. |
 | `issuedAt` | `READY`. When the credential was issued, as RFC 3339; absent when unknown. |
 | `expiresAt` | `READY`. When it expires, as RFC 3339; absent or `null` for a credential that does not expire. |
@@ -147,9 +147,9 @@ unchanged.
 `LoadFromEnvironment` does not read the broker, so an application starts while
 the broker is unavailable, and only a call's credential read waits for it. The
 connector's generated `NewProjectConnection` decodes the entry's settings from
-the document like an ordinary entry's. The generated code does not change:
-`provider.NewCredentialProvider` and `NewRefreshingCredentialProvider` route an
-entry that the document marks as shared to the broker.
+the document like an ordinary entry's. `provider.NewCredentialProvider` and
+`NewRefreshingCredentialProvider` route an entry that the document marks as
+shared to the broker.
 
 A shared entry then behaves like this:
 
@@ -180,12 +180,13 @@ A shared entry then behaves like this:
   connection stays usable.
 - `REAUTHORIZATION_REQUIRED` is `ErrReauthorizationRequired`, which the
   provider package reports as `sdkgo.ErrReauthorizationRequired`.
-- `CONNECTION_NOT_SELECTED` in a Preview document rereads the current
-  `configuration/head` once and takes only this entry's `sharedConnectionId`
-  from it. If it names another shared connection, that one is read; otherwise
-  the call fails with `ErrConnectionNotSelected`. A Live document is frozen, so
-  a selection that the broker no longer allows is a platform defect: the call
-  fails with `ErrConnectionNotSelected` and nothing is reread.
+- `CONNECTION_NOT_SELECTED` fails the call with `ErrConnectionNotSelected`,
+  in Live and Preview alike, and nothing is reread. The entry keeps the
+  `sharedConnectionId` of the loaded document for the life of the process,
+  because its settings came from that document too: following a new selection
+  could send one connection's credential to another connection's endpoint. A
+  Preview that selects another connection reads it when it starts again with
+  the new document.
 - A caller that finds a stale credential that has not expired uses it at once
   while another caller's read is in flight. When no credential is cached, or it
   has expired, callers wait for that read with their own context.
@@ -194,7 +195,31 @@ A shared entry then behaves like this:
   credential is never returned.
 - Callers that arrive within 2 seconds of a failed read share its failure.
 
-A settings change reaches an application only through a new document.
+A settings change or a new selection reaches an application only through a new
+document.
+
+### Host-kept secrets
+
+A host that keeps a shared connection refreshes and mints its credential
+itself, from the declarations in the connector's manifest, and it keeps the
+secrets that only those token requests use: an OAuth method's client secret and
+refresh tokens, a client credentials grant's client secret, and a JWT bearer
+grant's key. Applications run code that the host does not trust, so the broker
+serves the credential without those fields, and an application can neither
+refresh the shared credential nor rotate a single-use refresh token away from
+the other applications that share it. Which fields a host keeps follows from
+the token grants that each authentication method of the manifest declares.
+
+A connector's generated decoder requires every field, so the resolver decodes a
+shared entry's credential with the credential type's
+`UnmarshalSharedCredential` method instead, which
+`projectconfig.SharedCredentialUnmarshaler` describes, when the type has it. A
+connector whose manifest declares host-kept fields implements the method in its
+generated code. The method requires the other fields and accepts the host-kept
+ones when a broker still sends them. A connector version without the method
+decodes a shared credential with its ordinary decoder, which fails with "this
+connector version does not support shared credentials" when the broker has
+removed host-kept fields. Ordinary entries always use the ordinary decoder.
 
 ## Admission, recovery, and refresh
 

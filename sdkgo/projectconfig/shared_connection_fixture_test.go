@@ -221,12 +221,6 @@ func newSharedFixture(t *testing.T, first brokerReply) *sharedFixture {
 	return warmedSharedFixture(t, sharedScope, first)
 }
 
-// newPreviewFixture is newSharedFixture for a Preview project, whose configuration may select another connection.
-func newPreviewFixture(t *testing.T, first brokerReply) *sharedFixture {
-	t.Helper()
-	return warmedSharedFixture(t, previewScope, first)
-}
-
 func warmedSharedFixture(t *testing.T, scope projectconfig.Scope, first brokerReply) *sharedFixture {
 	t.Helper()
 	fixture := newUnreadSharedFixture(t, scope, first)

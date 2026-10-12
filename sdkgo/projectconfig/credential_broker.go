@@ -24,8 +24,9 @@ const maximumCredentialBrokerResponseBytes = 1 << 20
 const maximumBrokerCredentialBytes = 64 << 10
 
 var (
-	// ErrConnectionNotSelected reports that the credential broker no longer lets this scope use the shared connection,
-	// and that the current configuration document does not select another one for the entry.
+	// ErrConnectionNotSelected reports that the credential broker no longer lets this scope use the shared connection
+	// that the loaded configuration document selects. The process keeps that selection, so the error is terminal; an
+	// application reads a new selection when it starts with a new document, such as at the next Preview start.
 	ErrConnectionNotSelected = errors.New("project connection is not selected by this scope")
 	// ErrCredentialBrokerUnavailable reports a credential read that failed in transit or because the broker could not
 	// answer yet: a network error, a timeout, HTTP 408, 425, 429 or 5xx. The next read tries again.
