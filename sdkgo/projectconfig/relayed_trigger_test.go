@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/superdurable/dex-connectors-library/sdkgo/internal/testsupport"
 	"github.com/superdurable/dex-connectors-library/sdkgo/projectconfig"
+	"github.com/superdurable/dex-connectors-library/sdkgo/projectconfig/projectconfigtest"
 )
 
 func TestRegisterRelayedTriggerPostsTheSharedConnectionToTheBrokerOrigin(t *testing.T) {
@@ -214,4 +215,20 @@ func withoutHeader(header http.Header, name string) http.Header {
 	changed := header.Clone()
 	changed.Del(name)
 	return changed
+}
+
+func TestProjectConfigTestLoadsAProjectThatServesRelayedTriggers(t *testing.T) {
+	fixture := newUnreadSharedFixture(t, sharedScope, staticReply(1, sharedAccessOne))
+	reference := fixture.writeConfiguration(t, 1, "conn-7")
+	project, err := projectconfigtest.LoadProject(context.Background(), fixture.objects, sharedScope, reference)
+	require.NoError(t, err)
+	require.Equal(t, reference, project.Snapshot)
+
+	require.NoError(t, project.RegisterRelayedTrigger(context.Background(), sharedKey, registrationPath))
+	body := []byte(`{"event_id":"Ev1"}`)
+	now := time.Now()
+	require.NoError(t, project.VerifyRelayedRequest(context.Background(), signedRelayHeader(scopeToken, now, body), body, now))
+
+	_, err = projectconfigtest.LoadProject(context.Background(), nil, sharedScope, reference)
+	require.Error(t, err)
 }

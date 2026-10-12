@@ -385,6 +385,12 @@ be loopback/private IP, `localhost`, `host.docker.internal`, or a Kubernetes
 `.svc.cluster.local` service. This opt-in cannot silently select ordinary AWS
 storage without an explicit local endpoint. Hosted deployments omit both.
 
+Tests load a project from an in-memory `ObjectStore` with
+`projectconfigtest.LoadProject(ctx, objects, scope, reference)`, so they can
+serve shared entries and relayed Triggers from an in-process broker without
+S3. It skips the storage-target checks above, so production code never imports
+the `projectconfigtest` package.
+
 ## Dex Flow Changes
 
 No production Flow types, Steps, RPCs, Attributes, Channels, or Streams change.

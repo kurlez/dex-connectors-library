@@ -16,7 +16,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/superdurable/dex-connectors-library/sdkgo/internal/projectload"
 )
+
+func init() {
+	projectload.LoadFromObjectStore = loadProjectFromObjectStore
+}
 
 // LoadedProject contains an immutable ordinary configuration snapshot and independently resolved current credentials.
 type LoadedProject struct {
@@ -74,6 +79,15 @@ func LoadFromEnvironment(ctx context.Context) (*LoadedProject, error) {
 		return nil, err
 	}
 	reference := SnapshotRef{Key: os.Getenv("DEX_PROJECT_CONFIG_KEY"), Version: os.Getenv("DEX_PROJECT_CONFIG_VERSION"), Digest: os.Getenv("DEX_PROJECT_CONFIG_DIGEST"), MediaType: "application/json"}
+	return loadProject(ctx, objects, scope, reference, brokerClientOptions{})
+}
+
+// loadProjectFromObjectStore serves projectconfigtest.LoadProject. It skips LoadFromEnvironment's storage-target
+// checks, which guard building the S3 store, so it is not exported.
+func loadProjectFromObjectStore(ctx context.Context, objects ObjectStore, scope Scope, reference SnapshotRef) (*LoadedProject, error) {
+	if objects == nil {
+		return nil, errors.New("project object store is required")
+	}
 	return loadProject(ctx, objects, scope, reference, brokerClientOptions{})
 }
 
