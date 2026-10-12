@@ -43,6 +43,10 @@ A connector pull request that should release moves only that connector's
 
 A new connector declares `v0.1.0` for its first release.
 
+Every version that a connector's README files pin for its own module, such as
+`go get` commands, example tag URLs, and the `release-artifact` command's
+`--version` and `--tag`, stays on the manifest version. A test enforces it.
+
 `connectorctl` and the release workflow reject a version that is not a stable
 semantic version or is behind the connector's latest reachable tag, a release
 that breaks connections without a major bump, and a `(breaking)` release with
