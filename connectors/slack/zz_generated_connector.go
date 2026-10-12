@@ -268,9 +268,6 @@ func (credentials Credentials) Validate() error {
 	if credentials.UserToken.Reveal() == "" {
 		return fmt.Errorf("credential user_token is required")
 	}
-	if credentials.AppToken.Reveal() == "" {
-		return fmt.Errorf("credential app_token is required")
-	}
 	return nil
 }
 
@@ -281,9 +278,6 @@ func (credentials Credentials) validateSharedCredential() error {
 	}
 	if credentials.UserToken.Reveal() == "" {
 		return fmt.Errorf("credential user_token is required")
-	}
-	if credentials.AppToken.Reveal() == "" {
-		return fmt.Errorf("credential app_token is required")
 	}
 	return nil
 }

@@ -378,7 +378,7 @@ func sharedCredentialMethods() []sharedCredentialMethod {
 			credential:         `{"app_token":"manifest-app_token","bot_refresh_token":"manifest-bot_refresh_token","bot_token":"manifest-bot_token","oauth_client_id":"manifest-oauth_client_id","oauth_client_secret":"manifest-oauth_client_secret","user_refresh_token":"manifest-user_refresh_token","user_token":"manifest-user_token"}`,
 			decoded:            map[string]string{"app_token": "manifest-app_token", "bot_refresh_token": "manifest-bot_refresh_token", "bot_token": "manifest-bot_token", "oauth_client_id": "manifest-oauth_client_id", "oauth_client_secret": "manifest-oauth_client_secret", "user_refresh_token": "manifest-user_refresh_token", "user_token": "manifest-user_token"},
 			hostKept:           []string{"oauth_client_secret", "bot_refresh_token", "user_refresh_token"},
-			required:           []string{"bot_token", "user_token", "app_token"},
+			required:           []string{"bot_token", "user_token"},
 			isHostKeptRequired: false,
 		},
 	}
