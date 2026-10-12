@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -345,11 +346,16 @@ type tokenGrantContext struct {
 	prefix      string
 	credentials map[string]Field
 	settings    map[string]Field
+	// hostKeptCredentials are the method's fields that a host never serves to applications.
+	hostKeptCredentials []string
 }
 
 // validateTokenGrants checks the refresh and minting declarations of one method.
 func validateTokenGrants(prefix string, method AuthMethod, specConfigurationFields []Field) []string {
-	grantContext := tokenGrantContext{prefix: prefix, credentials: fieldsByName(method.Fields), settings: authMethodSettings(specConfigurationFields, method.Configuration)}
+	grantContext := tokenGrantContext{
+		prefix: prefix, credentials: fieldsByName(method.Fields), settings: authMethodSettings(specConfigurationFields, method.Configuration),
+		hostKeptCredentials: HostKeptCredentials(method),
+	}
 	var problems []string
 	if method.OAuth2 != nil {
 		problems = append(problems, grantContext.validateOAuthTokenRequests(method.OAuth2)...)
@@ -435,6 +441,11 @@ func (grantContext tokenGrantContext) validateJWTBearer(grant *JWTBearerGrant) [
 	for name, source := range map[string]ValueSource{"privateKey": grant.PrivateKey, "issuer": grant.Issuer, "audience": grant.Audience} {
 		problems = append(problems, grantContext.validateValueSource(label+" "+name, source, hasKey)...)
 	}
+	// A host keeps the private key from applications, which it can do only for a key in a secret credential field.
+	isKeyFromSecret := grant.PrivateKey.FromKey != "" || grantContext.isCredentialOfType(grant.PrivateKey.FromCredential, "secretString")
+	if !isKeyFromSecret || len(grant.PrivateKey.Values) > 0 {
+		problems = append(problems, label+" privateKey must be {fromKey} or {fromCredential} of a secretString field, without values")
+	}
 	if grant.Subject != nil {
 		problems = append(problems, grantContext.validateValueSource(label+" subject", *grant.Subject, hasKey)...)
 	}
@@ -447,6 +458,9 @@ func (grantContext tokenGrantContext) validateJWTBearer(grant *JWTBearerGrant) [
 	for _, credentialCopy := range grant.CredentialCopies {
 		if !grantContext.isCredential(credentialCopy.Credential) || !grantContext.isCredential(credentialCopy.FromCredential) {
 			problems = append(problems, label+" credentialCopies must name credential fields")
+		}
+		if slices.Contains(grantContext.hostKeptCredentials, credentialCopy.FromCredential) {
+			problems = append(problems, label+" credentialCopies cannot copy host-kept field "+credentialCopy.FromCredential)
 		}
 	}
 	problems = append(problems, grantContext.validateResponseRules(label, grant.TerminalErrorCodes, grant.MissingExpiry, nil)...)

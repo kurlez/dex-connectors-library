@@ -145,6 +145,24 @@ func TestTokenGrantDeclarationsRejectInvalidReferences(t *testing.T) {
 		"a copy from an unknown field": {edits: []manifestEdit{
 			{"{credential: primary_email, fromCredential: delegated_user}", "{credential: primary_email, fromCredential: user}"},
 		}, problem: "credentialCopies must name credential fields"},
+		"a literal private key": {edits: []manifestEdit{
+			{"privateKey: {fromCredential: private_key}", "privateKey: inline-private-key"},
+		}, problem: "privateKey must be {fromKey} or {fromCredential} of a secretString field, without values"},
+		"a private key from a setting": {edits: []manifestEdit{
+			{"privateKey: {fromCredential: private_key}", "privateKey: {fromSetting: tenantId}"},
+		}, problem: "privateKey must be {fromKey} or {fromCredential} of a secretString field, without values"},
+		"a private key template": {edits: []manifestEdit{
+			{"privateKey: {fromCredential: private_key}", `privateKey: {template: "https://keys.example.com/{client_id}"}`},
+		}, problem: "privateKey must be {fromKey} or {fromCredential} of a secretString field, without values"},
+		"a private key from a field that is not secret": {edits: []manifestEdit{
+			{"privateKey: {fromCredential: private_key}", "privateKey: {fromCredential: client_id}"},
+		}, problem: "privateKey must be {fromKey} or {fromCredential} of a secretString field, without values"},
+		"a translated private key": {edits: []manifestEdit{
+			{"privateKey: {fromCredential: private_key}", "privateKey: {fromCredential: private_key, values: {sandbox: inline-private-key}}"},
+		}, problem: "privateKey must be {fromKey} or {fromCredential} of a secretString field, without values"},
+		"a copy of a host-kept field": {edits: []manifestEdit{
+			{"{credential: primary_email, fromCredential: delegated_user}", "{credential: access_token, fromCredential: service_account_key}"},
+		}, problem: "credentialCopies cannot copy host-kept field service_account_key"},
 		"a mint without refreshable": {edits: []manifestEdit{
 			{"    refreshable: true\n", ""},
 		}, problem: "spec.auth.refreshable must be true"},
