@@ -43,9 +43,14 @@ type MessageTriggerRunnerConfig struct {
 	ThreadReplyCreatedRoutes []ThreadReplyCreatedTriggerRoute
 }
 
-// MessageTriggerRunner receives Slack messages through one Socket Mode connection and dispatches matching routes.
+// MessageTriggerRunner receives Slack messages for one connection and dispatches matching routes. It receives
+// them through Socket Mode when the connection's credential has an app_token. A runner from
+// NewProjectMessageTriggerRunner whose shared connection has none receives the events that its host relays
+// instead, through ServeHTTP.
 type MessageTriggerRunner struct {
 	routes []messageTriggerRoute
+	// relay receives relayed events; it is nil for a runner built without a project configuration.
+	relay *relayedMessageReceiver
 }
 
 // NewMessageTriggerRunner creates one runner for all configured Slack message Trigger routes.
@@ -88,10 +93,25 @@ func NewMessageTriggerRunner(config MessageTriggerRunnerConfig) (*MessageTrigger
 // each reconnect it replays the inboxes again, so an event persisted on a failed connection is delivered
 // before any envelope read on the next one.
 //
+// A runner from NewProjectMessageTriggerRunner first reads the connection's credential, retrying with the
+// Socket Mode backoff while it is unavailable. With an app_token it uses Socket Mode. Without one, on a shared
+// connection, it replays the inboxes, serves relayed events through ServeHTTP and registers the connection
+// name with the host, retrying while the host is unavailable; it returns an error when the host refuses the
+// registration, when the scope no longer selects the connection, and for a connection that is not shared.
+//
 // Run logs through the connection's WithLogger logger: INFO when a Socket Mode connection opens, WARN with
 // the next delay when one fails, DEBUG for every ignored message with its reason, and the sdkgo delivery
 // records (skips, retries with their backoff delay, and recoveries) with the route's binding.
 func (runner *MessageTriggerRunner) Run(ctx context.Context) error {
+	if runner.relay != nil {
+		isRelayed, err := runner.relay.selectRelayedMode(ctx)
+		if err != nil {
+			return err
+		}
+		if isRelayed {
+			return runner.relay.run(ctx)
+		}
+	}
 	if err := replayMessageTriggerRoutes(ctx, runner.routes); err != nil {
 		return err
 	}
@@ -131,9 +151,10 @@ type durableMessageTriggerTarget func(
 ) (sdkgo.TriggerTarget[MessageEvent], error)
 
 // NewProjectMessageTriggerRunner opens connectionName and its configured bindings from the loaded project
-// configuration and creates one durable Socket Mode runner. Each route's target receives its events through
-// the binding's durable project inbox, which every replica of the application shares. A route whose binding
-// is not configured returns an error. The WithLogger option also applies to the durable inboxes it creates.
+// configuration and creates one durable runner, which uses Socket Mode or the host's relay as Run describes.
+// Mount the runner at RelayedTriggerPath(connectionName) on the application's HTTP server. Each route's target
+// receives its events through the binding's durable project inbox, which every replica of the application
+// shares. A route whose binding is not configured returns an error. The WithLogger option also applies to the durable inboxes it creates.
 func NewProjectMessageTriggerRunner(
 	project *projectconfig.LoadedProject,
 	connectionName string,
@@ -144,7 +165,7 @@ func NewProjectMessageTriggerRunner(
 	if err != nil {
 		return nil, err
 	}
-	return newDurableMessageTriggerRunner(connection, project.Configuration, config, func(
+	runner, err := newDurableMessageTriggerRunner(connection, project.Configuration, config, func(
 		key projectconfig.TriggerInboxKey, target sdkgo.TriggerTarget[MessageEvent],
 	) (sdkgo.TriggerTarget[MessageEvent], error) {
 		inbox, err := project.TriggerInbox(key)
@@ -153,6 +174,13 @@ func NewProjectMessageTriggerRunner(
 		}
 		return provider.NewDurableTriggerTarget(inbox, key, target, provider.WithTriggerLogger(connection.client.logger))
 	})
+	if err != nil {
+		return nil, err
+	}
+	if runner.relay, err = newRelayedMessageReceiver(project, connection, runner.routes); err != nil {
+		return nil, err
+	}
+	return runner, nil
 }
 
 // newDurableMessageTriggerRunner runs config's routes on connection with the bindings that configuration

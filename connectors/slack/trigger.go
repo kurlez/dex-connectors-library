@@ -316,18 +316,26 @@ func runMessageTriggerConnection(ctx context.Context, routes []messageTriggerRou
 		if err := acknowledgeEnvelope(connection, envelope.EnvelopeID); err != nil {
 			return true, err
 		}
-		// Deliveries stay inline, so a root is delivered before any reply received after it. The channel and
-		// thread reach the records of the inbox and the Dex targets too, so one thread_ts finds them all.
-		for _, delivery := range deliveries {
-			deliveryCtx := sdkgo.ContextWithTriggerLogAttrs(ctx,
-				slog.String("channel", delivery.event.Payload.ChannelID),
-				slog.String("thread_ts", delivery.event.Payload.ThreadTimestamp),
-			)
-			if err := sdkgo.DeliverTrigger(deliveryCtx, delivery.target, delivery.event, sdkgo.WithTriggerLogger(delivery.source.logger())); err != nil {
-				return true, err
-			}
+		if err := deliverMessageTriggerDeliveries(ctx, deliveries); err != nil {
+			return true, err
 		}
 	}
+}
+
+// deliverMessageTriggerDeliveries delivers one event's deliveries inline in route order, so a root is delivered
+// before any reply received after it. The channel and thread reach the records of the inbox and the Dex targets
+// too, so one thread_ts finds them all.
+func deliverMessageTriggerDeliveries(ctx context.Context, deliveries []pendingMessageTriggerDelivery) error {
+	for _, delivery := range deliveries {
+		deliveryCtx := sdkgo.ContextWithTriggerLogAttrs(ctx,
+			slog.String("channel", delivery.event.Payload.ChannelID),
+			slog.String("thread_ts", delivery.event.Payload.ThreadTimestamp),
+		)
+		if err := sdkgo.DeliverTrigger(deliveryCtx, delivery.target, delivery.event, sdkgo.WithTriggerLogger(delivery.source.logger())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // credentialCall identifies the source's credential reads. A project connection's provider refuses a call

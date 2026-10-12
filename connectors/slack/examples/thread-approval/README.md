@@ -38,7 +38,7 @@ calling Dex. The pure filter has no error result.
 
 This walkthrough uses these published releases:
 
-- [Slack Connector v0.21.0](https://github.com/superdurable/dex-connectors-library/releases/tag/connectors%2Fslack%2Fv0.21.0)
+- [Slack Connector v1.0.0](https://github.com/superdurable/dex-connectors-library/releases/tag/connectors%2Fslack%2Fv1.0.0)
 - [dexcli v0.13.7](https://github.com/superdurable/dex/releases/tag/cli-v0.13.7)
 
 Install Go 1.24 or newer and curl. You also need permission to create and
@@ -66,7 +66,7 @@ macOS installation, download the matching archive from the
 ## 1. Prepare a clean local test project
 
 Create a separate directory that consumes the released Connector. The Flow
-source is copied from the immutable v0.21.0 tag so dexcli can analyze it as an
+source is copied from the immutable v1.0.0 tag so dexcli can analyze it as an
 application dependency rather than as part of the Connector module itself.
 
 ```bash
@@ -75,11 +75,11 @@ cd slack-thread-approval-e2e
 mkdir -p flow build
 
 curl -fsSL \
-  https://raw.githubusercontent.com/superdurable/dex-connectors-library/refs/tags/connectors/slack/v0.22.1/connectors/slack/examples/thread-approval/flow/workflow.go \
+  https://raw.githubusercontent.com/superdurable/dex-connectors-library/refs/tags/connectors/slack/v1.0.0/connectors/slack/examples/thread-approval/flow/workflow.go \
   -o flow/workflow.go
 
 go mod init example.com/slack-thread-approval-e2e
-go get github.com/superdurable/dex-connectors-library/connectors/slack@v0.22.1
+go get github.com/superdurable/dex-connectors-library/connectors/slack@v1.0.0
 go mod tidy
 ```
 
@@ -309,14 +309,14 @@ when exact matching is required.
 Open a second terminal. The Worker reads the `DEX_PROJECT_*` project
 configuration environment described in
 [project configuration](../../../../sdkgo/projectconfig/README.md); Dex Web or
-Superverse Studio writes that configuration when you save the connection. Use
+a hosting platform writes that configuration when you save the connection. Use
 the Dex Server address printed by the current dexcli process:
 
 ```bash
 export DEX_FLOW_SERVICE_ADDRESS="127.0.0.1:8801"
 
 GOWORK=off go run \
-  github.com/superdurable/dex-connectors-library/connectors/slack/examples/thread-approval@v0.22.1
+  github.com/superdurable/dex-connectors-library/connectors/slack/examples/thread-approval@v1.0.0
 ```
 
 Replace `127.0.0.1:8801` when dexcli printed another Dex Server address. The
@@ -326,6 +326,12 @@ another one before starting it:
 ```bash
 export DEX_WORKER_BIND_ADDRESS="127.0.0.1:8913"
 ```
+
+The example also listens on `127.0.0.1:8839`, or `TRIGGER_BIND_ADDRESS`, at
+`slack.RelayedTriggerPath("slack-workspace")`, where a host posts the events it
+relays for a shared connection without an `app_token`
+([relayed events](../../README.md#relayed-events)). This walkthrough's
+connection has an `app_token` and uses Socket Mode, so that path answers `503`.
 
 Keep exactly one example Worker running for this Slack app. Slack distributes
 Socket Mode envelopes among active WebSocket connections rather than
@@ -464,8 +470,10 @@ Other records to look for:
   30 seconds while attempts keep failing, and `attempt` counts them. The
   `error` names the cause without the token, such as `Slack rejected the Socket
   Mode connection: invalid_auth (HTTP 200)` for a revoked or wrong `xapp-...`
-  token, or `Slack Socket Mode credentials are unavailable: credential
-  app_token is required` for a connection saved without one.
+  token. A connection saved without an `app_token` stops the Worker with
+  `Slack connection "slack-workspace" has no app_token for Socket Mode and is
+  not a shared connection whose host relays its events`; save the `xapp-...`
+  token in Dex Web and restart.
 - `trigger event skipped: filtered` (INFO) means the application filter
   rejected an event that the binding configuration matched.
 - `trigger event ignored` (DEBUG) names the `reason` a route did not match a

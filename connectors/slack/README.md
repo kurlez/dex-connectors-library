@@ -1,8 +1,9 @@
 # Slack Connector
 
 This module reads and writes Slack channel threads and receives Slack Events
-API messages through Socket Mode. It supports public and private channels, not
-direct messages.
+API messages through Socket Mode, or from a host that relays them for a shared
+connection (see [Relayed events](#relayed-events)). It supports public and
+private channels, not direct messages.
 
 ## Slack app setup
 
@@ -23,7 +24,9 @@ Each replacement pair is persisted atomically in project storage; an
 Web also records the access-token expiry that refresh requires; do not
 hand-author rotating-token metadata. Enter the
 `xapp-` app-level token in the host-owned secret field; it is never sent to the
-Studio iframe. Use Slack's standard OAuth flow with the host-owned client
+Studio iframe. Since v1.0.0 `app_token` is optional: a connection without it
+receives its events from a host that relays them instead of through Socket
+Mode. Use Slack's standard OAuth flow with the host-owned client
 secret. Slack's localhost PKCE installation mode cannot request bot scopes.
 
 ## Trigger settings
@@ -64,7 +67,7 @@ If a picker cannot load, copy IDs manually:
 
 ## Project configuration
 
-Dex Web or Superverse Studio saves the connection, its credentials, and both
+Dex Web or a hosting platform saves the connection, its credentials, and both
 Trigger bindings in the project configuration. The application loads that
 configuration once and opens the connection by name, as
 [`examples/thread-approval/main.go`](examples/thread-approval/main.go) does:
@@ -122,6 +125,58 @@ doubling up to 30 seconds while attempts keep failing. The delay starts again
 at one second once a connection receives Slack's `hello`. Canceling the
 runner's context closes the socket at once.
 
+## Relayed events
+
+A host that installs its own Slack app in many workspaces cannot hand each
+application that app's `xapp-` token, because one Socket Mode connection would
+receive every workspace's events. It receives the Events API deliveries over
+HTTP instead and relays each event to the applications whose shared connection
+serves that workspace. The connection's credential then has no `app_token`.
+
+`NewProjectMessageTriggerRunner` decides when `Run` starts. It reads the
+connection's credential, retrying with the Socket Mode backoff while it is
+unavailable. With an `app_token` it uses Socket Mode as described above.
+Without one, on a shared connection (an entry with `sharedConnectionId`), it
+receives relayed events; on any other connection `Run` returns an error.
+Mount the runner on the application's HTTP server at
+`slack.RelayedTriggerPath(connectionName)`, which is `/triggers/slack/`
+followed by the connection name in unpadded base64url, as
+[`examples/thread-approval/main.go`](examples/thread-approval/main.go) does:
+
+```go
+mux := http.NewServeMux()
+mux.Handle(slack.RelayedTriggerPath(threadapproval.ConnectionName), triggerRunner)
+```
+
+In relayed mode `Run` replays every binding's durable inbox, starts receiving,
+and then registers the connection name with the host through
+`projectconfig.LoadedProject.RegisterRelayedTrigger`, so the host knows where
+the connection's events go. It retries a host that is unavailable and returns
+an error when the host does not relay the connection, when the scope no longer
+selects it, or when the host refuses the registration. It registers again on
+every start.
+
+Each relayed request carries Slack's `event_id`, `event_time`, outer `team_id`
+and inner `event`, the shape of a Socket Mode payload, signed with the scope
+token in `Dex-Relay-Signature`. The runner checks the signature with
+`projectconfig.LoadedProject.VerifyRelayedRequest` and answers:
+
+- `200` once every binding that matches the message recorded it in its durable
+  inbox, or at once for a message no binding matches;
+- `400` for a missing, wrong or stale signature, or a body that is not a Slack
+  callback;
+- `413` for a body over 1 MiB;
+- `503` while the runner does not receive relayed events: before `Run`, while
+  it replays the inboxes, and for a connection that uses Socket Mode.
+
+After answering, the runner delivers each event to its routes inline in arrival
+order, as Socket Mode does, so a root is delivered before any reply received
+after it. A host that relays an event once does not redeliver it, so an event
+is durable only once the runner answered `200`. Slack's `event_id` is the
+Trigger event ID, so Dex starts one Flow per event even when the host or Slack
+delivers it again; an RPC target still treats a repeated event ID as a
+duplicate.
+
 ## Logging
 
 The runner logs through `log/slog`, to `slog.Default()` unless you pass
@@ -137,6 +192,17 @@ creates.
 | DEBUG | `trigger event ignored` | `event_id`, `channel`, `reason`, and `subtype` for a message subtype |
 | DEBUG | `slack socket mode envelope ignored` | `type`, `envelope_id` |
 | WARN | `trigger event skipped: undecodable` | `envelope_id`, `error` |
+| INFO | `slack relayed trigger registered` | |
+| WARN | `slack relayed trigger registration failed; retrying` | `attempt`, `delay`, `error` |
+| WARN | `slack relayed request refused` | `reason`: `verification_unavailable` |
+| DEBUG | `slack relayed request refused` | `reason`: `invalid_signature` |
+| WARN | `slack trigger credentials unavailable; retrying` | `attempt`, `delay` |
+
+Relayed records never contain a header value, a signature or the body. A
+`verification_unavailable` refusal means the scope token could not be read,
+and the host is answered `503`. A request with a missing, wrong or stale
+signature is logged only at DEBUG, because the route is public and anyone can
+send one.
 
 Every record carries `connector` and `connection`; route records also carry
 `trigger` and `binding`. A healthy connection logs one INFO
