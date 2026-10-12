@@ -744,12 +744,15 @@ file is one JSON object, `{"calls":[...]}`, in answer order. Each call has
 `connection` (the logical connection name), `operation` (the operation ID) and
 `branch` (the branch the SDK selected; absent for a Retry), plus `connectorId`,
 `flowId`, `callId`, and the booleans `retry`, `replay` and `unscripted` when
-true. The field names are stable. The directory belongs to one run, because
-the file accumulates every call of the run; a write is a locked read-modify-write
-replaced by an atomic rename, so parallel tests and several test processes of
-the run lose no call, and a write failure fails the test. Without the variable
-nothing is written. The cross-process lock is a `connector-calls.json.lock` file created
-exclusively, which is removed when older than 10 seconds.
+true. The field names are stable. The directory belongs to one run, because the file accumulates every call of
+the run, and a harness reads it after the tests end. Each call is added under
+an in-process mutex and an exclusive `connector-calls.json.lock` file by
+overwriting the document's closing `]}` in one write, so a call costs the same
+however many came before, and parallel tests and several test processes of the
+run lose no call. A lock held for 30 seconds fails the call, and a lock file
+older than 10 seconds is removed as a killed process's. A write failure, or a
+file that does not end as a document, fails the test. Without the variable
+nothing is written.
 
 `DecodeOutput[OUT]` strictly decodes a JSON fixture: unknown fields and
 trailing data fail, and an output type with a `Validate() error` method must
