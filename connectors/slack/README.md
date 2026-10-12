@@ -194,12 +194,15 @@ creates.
 | WARN | `trigger event skipped: undecodable` | `envelope_id`, `error` |
 | INFO | `slack relayed trigger registered` | |
 | WARN | `slack relayed trigger registration failed; retrying` | `attempt`, `delay`, `error` |
-| WARN | `slack relayed request refused` | `reason`: `invalid_signature` or `verification_unavailable` |
+| WARN | `slack relayed request refused` | `reason`: `verification_unavailable` |
+| DEBUG | `slack relayed request refused` | `reason`: `invalid_signature` |
 | WARN | `slack trigger credentials unavailable; retrying` | `attempt`, `delay` |
 
 Relayed records never contain a header value, a signature or the body. A
 `verification_unavailable` refusal means the scope token could not be read,
-and the host is answered `503`.
+and the host is answered `503`. A request with a missing, wrong or stale
+signature is logged only at DEBUG, because the route is public and anyone can
+send one.
 
 Every record carries `connector` and `connection`; route records also carry
 `trigger` and `binding`. A healthy connection logs one INFO

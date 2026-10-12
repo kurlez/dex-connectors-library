@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -89,7 +90,9 @@ func TestRelayedRunnerRefusesUnsignedStaleAndOversizedRequests(t *testing.T) {
 
 	require.Empty(t, host.pendingEventIDs(t))
 	require.Empty(t, routes.deliveries())
-	require.Len(t, host.logs.Find("slack relayed request refused", map[string]string{"reason": "invalid_signature"}), 4)
+	refusals := host.logs.Find("slack relayed request refused", map[string]string{"reason": "invalid_signature"})
+	require.Len(t, refusals, 4)
+	require.Equal(t, slog.LevelDebug, refusals[0].Level, "anyone can post to the public route, so a bad signature is not a warning")
 	requireNoSentinel(t, host.logs)
 }
 

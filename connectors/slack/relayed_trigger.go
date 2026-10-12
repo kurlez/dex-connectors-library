@@ -177,13 +177,14 @@ func (receiver *relayedMessageReceiver) verifyRequest(ctx context.Context, reque
 	if err == nil {
 		return nil
 	}
-	reason := "invalid_signature"
+	// The route is public, so anyone can send a bad signature; only the application's own failure is a warning.
+	level, reason := slog.LevelDebug, "invalid_signature"
 	if errors.Is(err, projectconfig.ErrCredentialBrokerUnavailable) {
-		reason = "verification_unavailable"
+		level, reason = slog.LevelWarn, "verification_unavailable"
 		err = fmt.Errorf("%w: %w", webhooktrigger.ErrVerificationUnavailable, err)
 	}
 	source := receiver.routes[0].source
-	source.log(ctx, slog.LevelWarn, "slack relayed request refused", source.connectionAttrs(), slog.String("reason", reason))
+	source.log(ctx, level, "slack relayed request refused", source.connectionAttrs(), slog.String("reason", reason))
 	return err
 }
 
