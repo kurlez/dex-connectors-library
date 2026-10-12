@@ -737,6 +737,20 @@ call that any mock in the process answered, without inputs and with stable JSON
 field names, so a test harness can check that every wired branch was
 exercised.
 
+When the environment variable `DEX_CONNECTOR_MOCK_REPORT_DIR` names a
+directory, every mock also writes each call it answers to
+`connector-calls.json` there, so a harness needs no helper in the tests. The
+file is one JSON object, `{"calls":[...]}`, in answer order. Each call has
+`connection` (the logical connection name), `operation` (the operation ID) and
+`branch` (the branch the SDK selected; absent for a Retry), plus `connectorId`,
+`flowId`, `callId`, and the booleans `retry`, `replay` and `unscripted` when
+true. The field names are stable. The directory belongs to one run, because
+the file accumulates every call of the run; a write is a locked read-modify-write
+replaced by an atomic rename, so parallel tests and several test processes of
+the run lose no call, and a write failure fails the test. Without the variable
+nothing is written. The cross-process lock is a `connector-calls.json.lock` file created
+exclusively, which is removed when older than 10 seconds.
+
 `DecodeOutput[OUT]` strictly decodes a JSON fixture: unknown fields and
 trailing data fail, and an output type with a `Validate() error` method must
 pass it. Generated mock packages decode their manifest fixtures with it.

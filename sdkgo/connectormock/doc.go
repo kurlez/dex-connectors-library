@@ -62,7 +62,8 @@
 // call observes one provider effect. Calls returns each mock's calls with
 // their input, and RecordedCalls returns every call answered in the process
 // without inputs, so a test harness can check that every wired branch was
-// exercised.
+// exercised. When ReportDirectoryEnvironment names a directory, every call is
+// also written to ReportFileName there, as the sdkgo README documents.
 //
 // Mocks never write progress or text Streams and never resolve credentials.
 package connectormock
