@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/superdurable/dex-connectors-library/sdkgo"
@@ -122,4 +123,42 @@ func TestReportWriteFailureFailsTheTest(t *testing.T) {
 	runQuery(t, lookup, uniqueFlowID(t), 0, widgetInput{Name: "gear"})
 
 	recorder.requireFailure(t, "lock the connector call report")
+}
+
+func TestReportLockHeldTooLongFailsTheCall(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv(connectormock.ReportDirectoryEnvironment, directory)
+	t.Cleanup(connectormock.SetReportLockLimitsForTest(100*time.Millisecond, time.Hour))
+	require.NoError(t, os.WriteFile(filepath.Join(directory, connectormock.ReportFileName+".lock"), nil, 0o600))
+	recorder := newRecordingT(t)
+	lookup := connectormock.NewQuery[widgetInput, widget](recorder, lookupDefinition)
+	lookup.Default(connectormock.Branch(widgetFound, widget{ID: "gear"}, nil))
+
+	runQuery(t, lookup, uniqueFlowID(t), 0, widgetInput{Name: "gear"})
+
+	recorder.requireFailure(t, "stayed held for 100ms")
+}
+
+func TestReportStaleLockIsBroken(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv(connectormock.ReportDirectoryEnvironment, directory)
+	t.Cleanup(connectormock.SetReportLockLimitsForTest(time.Minute, time.Nanosecond))
+	require.NoError(t, os.WriteFile(filepath.Join(directory, connectormock.ReportFileName+".lock"), nil, 0o600))
+
+	answerLookups(t, uniqueFlowID(t), 1)
+
+	require.Len(t, readReport(t, directory).Calls, 1)
+}
+
+func TestReportThatDoesNotEndAsADocumentFailsTheCall(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv(connectormock.ReportDirectoryEnvironment, directory)
+	require.NoError(t, os.WriteFile(filepath.Join(directory, connectormock.ReportFileName), []byte("garbage"), 0o600))
+	recorder := newRecordingT(t)
+	lookup := connectormock.NewQuery[widgetInput, widget](recorder, lookupDefinition)
+	lookup.Default(connectormock.Branch(widgetFound, widget{ID: "gear"}, nil))
+
+	runQuery(t, lookup, uniqueFlowID(t), 0, widgetInput{Name: "gear"})
+
+	recorder.requireFailure(t, "does not end with")
 }

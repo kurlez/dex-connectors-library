@@ -39,21 +39,26 @@ type reportedCall struct {
 	IsUnscripted bool           `json:"unscripted,omitempty"`
 }
 
-type callReport struct {
-	Calls []reportedCall `json:"calls"`
-}
-
-const (
-	reportLockRetry = 5 * time.Millisecond
-	// reportLockStale is how long a lock file may exist before its holder is
-	// presumed dead; one write takes milliseconds.
-	reportLockStale = 10 * time.Second
+// reportLockTimeout and reportLockStale are variables so a test can shorten
+// them. A write takes milliseconds, so a lock held for reportLockStale belongs
+// to a killed process, and a lock that stays held for reportLockTimeout fails
+// the call that waits.
+var (
+	reportLockTimeout = 30 * time.Second
+	reportLockStale   = 10 * time.Second
 )
+
+const reportLockRetry = 5 * time.Millisecond
+
+// reportClose ends the document; a call is added by overwriting it.
+const reportClose = "]}"
 
 // lockReport takes the report's cross-process lock, a file created
 // exclusively, and returns the function that releases it. A lock file older
-// than reportLockStale belonged to a killed process and is removed.
+// than reportLockStale belonged to a killed process and is removed. It fails
+// when the lock stays held for reportLockTimeout.
 func lockReport(path string) (func(), error) {
+	deadline := time.Now().Add(reportLockTimeout)
 	for {
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
@@ -67,23 +72,34 @@ func lockReport(path string) (func(), error) {
 			_ = os.Remove(path)
 			continue
 		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("the lock %s stayed held for %s; remove it if no test process is running", path, reportLockTimeout)
+		}
 		time.Sleep(reportLockRetry)
 	}
 }
 
 // reportWriters serializes the report writes of the goroutines of this process;
-// the file lock serializes those of several test processes.
+// the lock file serializes those of several test processes.
 var reportWriters sync.Mutex
 
 // appendToReport adds call to the report file in the directory named by
-// ReportDirectoryEnvironment, and does nothing when it is unset. The file is
-// rewritten through a temporary file and a rename, so a reader never sees a
-// partial document, and its read-modify-write holds a lock file, so parallel tests and several test processes never lose a
-// call.
+// ReportDirectoryEnvironment, and does nothing when it is unset. Under the
+// lock it overwrites the document's closing "]}" with the new call and the
+// closing again in one write, so the cost of a call does not grow with the
+// calls before it, and a failed write fails the test.
 func appendToReport(call RecordedCall) error {
 	directory := os.Getenv(ReportDirectoryEnvironment)
 	if directory == "" {
 		return nil
+	}
+	encoded, err := json.Marshal(reportedCall{
+		Connection: call.ConnectionName, Operation: call.OperationID, Branch: call.Branch,
+		ConnectorID: call.ConnectorID, FlowID: call.FlowID, CallID: call.CallID,
+		IsRetry: call.IsRetry, IsReplay: call.IsReplay, IsUnscripted: call.IsUnscripted,
+	})
+	if err != nil {
+		return fmt.Errorf("encode the connector call report: %w", err)
 	}
 	reportWriters.Lock()
 	defer reportWriters.Unlock()
@@ -94,31 +110,28 @@ func appendToReport(call RecordedCall) error {
 	}
 	defer unlock()
 
-	var report callReport
-	switch existing, err := os.ReadFile(path); {
-	case err == nil:
-		if err := json.Unmarshal(existing, &report); err != nil {
-			return fmt.Errorf("read the connector call report %s: %w", path, err)
-		}
-	case !errors.Is(err, os.ErrNotExist):
-		return fmt.Errorf("read the connector call report: %w", err)
-	}
-	report.Calls = append(report.Calls, reportedCall{
-		Connection: call.ConnectionName, Operation: call.OperationID, Branch: call.Branch,
-		ConnectorID: call.ConnectorID, FlowID: call.FlowID, CallID: call.CallID,
-		IsRetry: call.IsRetry, IsReplay: call.IsReplay, IsUnscripted: call.IsUnscripted,
-	})
-	encoded, err := json.Marshal(report)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return fmt.Errorf("encode the connector call report: %w", err)
+		return fmt.Errorf("open the connector call report: %w", err)
 	}
-	temporary := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
-	if err := os.WriteFile(temporary, encoded, 0o600); err != nil {
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat the connector call report: %w", err)
+	}
+	offset, entry := info.Size(), string(encoded)
+	if offset == 0 {
+		entry = `{"calls":[` + entry
+	} else {
+		offset -= int64(len(reportClose))
+		tail := make([]byte, len(reportClose))
+		if _, err := file.ReadAt(tail, offset); offset < 0 || err != nil || string(tail) != reportClose {
+			return fmt.Errorf("the connector call report %s does not end with %q; remove it between runs", path, reportClose)
+		}
+		entry = "," + entry
+	}
+	if _, err := file.WriteAt([]byte(entry+reportClose), offset); err != nil {
 		return fmt.Errorf("write the connector call report: %w", err)
-	}
-	if err := os.Rename(temporary, path); err != nil {
-		_ = os.Remove(temporary)
-		return fmt.Errorf("replace the connector call report: %w", err)
 	}
 	return nil
 }
