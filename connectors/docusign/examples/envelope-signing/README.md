@@ -65,7 +65,7 @@ mkdir -p /tmp/docusign-release
 go run ./cmd/connectorctl release-artifact \
   --manifest connectors/docusign/connector.yaml \
   --module-path github.com/superdurable/dex-connectors-library/connectors/docusign \
-  --version v0.21.0 --tag connectors/docusign/v0.21.0 \
+  --version v0.22.0 --tag connectors/docusign/v0.22.0 \
   --source-sha "$(git rev-parse HEAD)" \
   --output /tmp/docusign-release/connector-release.json \
   --digest-output /tmp/docusign-release/connector-release.json.sha256

@@ -37,7 +37,7 @@ because Dex Web Start Flow invokes `WaitFor` on the start Step.
 
 ## Release baseline
 
-- Notion Connector `v0.21.0`
+- Notion Connector `v0.21.1`
 - dexcli `v1.1.0` or a later stable release
 
 ## 1. Prepare the Notion database
@@ -69,12 +69,12 @@ cd notion-submission-intake-e2e
 mkdir -p flow build
 
 curl -fsSL \
-  https://raw.githubusercontent.com/superdurable/dex-connectors-library/refs/tags/connectors/notion/v0.21.0/connectors/notion/examples/submission-intake/flow/workflow.go \
+  https://raw.githubusercontent.com/superdurable/dex-connectors-library/refs/tags/connectors/notion/v0.21.1/connectors/notion/examples/submission-intake/flow/workflow.go \
   -o flow/workflow.go
 
 go mod init example.com/notion-submission-intake-e2e
 go mod edit -go=1.24.0
-go get github.com/superdurable/dex-connectors-library/connectors/notion@v0.21.0
+go get github.com/superdurable/dex-connectors-library/connectors/notion@v0.21.1
 go mod tidy
 ```
 
@@ -125,7 +125,7 @@ describes:
 export DEX_FLOW_SERVICE_ADDRESS="127.0.0.1:8801"
 
 GOWORK=off go run \
-  github.com/superdurable/dex-connectors-library/connectors/notion/examples/submission-intake@v0.21.0
+  github.com/superdurable/dex-connectors-library/connectors/notion/examples/submission-intake@v0.21.1
 ```
 
 The Worker listens on `127.0.0.1:8851` by default. Set
@@ -183,8 +183,8 @@ They verify:
 - an unwired optional branch;
 - invalid Start Flow input.
 
-Before `v0.21.0` is published, build a local release artifact with
+Before `v0.21.1` is published, build a local release artifact with
 `go run ./cmd/connectorctl release-artifact` from the repository root and pass
 its directory to `dexcli dev --connector-release-override notion=DIRECTORY`.
-The test project must still resolve `connectors/notion@v0.21.0` without a
+The test project must still resolve `connectors/notion@v0.21.1` without a
 `replace`, as the compatibility gate does with a local module proxy.
