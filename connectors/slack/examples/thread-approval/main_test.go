@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,7 +139,12 @@ func TestRunUntilStoppedWaitsForUnreachableDexServerAndStopsCleanly(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	result := make(chan error, 1)
-	go func() { result <- runUntilStopped(ctx, worker, triggerRunner, client.HealthCheck, logs.Logger()) }()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := &http.Server{Handler: newTriggerMux(triggerRunner), ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		result <- runUntilStopped(ctx, server, listener, worker, triggerRunner, client.HealthCheck, logs.Logger())
+	}()
 	require.Never(t, func() bool { return len(result) > 0 }, 2*time.Second, 50*time.Millisecond,
 		"the example must wait for the Dex Server instead of exiting")
 	waits := logs.Find("dex server unavailable; retrying", nil)
@@ -147,6 +153,10 @@ func TestRunUntilStoppedWaitsForUnreachableDexServerAndStopsCleanly(t *testing.T
 	require.Equal(t, "1", waits[0].Attrs["attempt"])
 	require.Equal(t, "250ms", waits[0].Attrs["delay"])
 	require.Empty(t, logs.Find("slack socket mode connected", nil), "the Trigger runner waits for the Dex Server")
+	relayed, err := http.Post("http://"+listener.Addr().String()+slack.RelayedTriggerPath(threadapproval.ConnectionName), "application/json", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	require.NoError(t, relayed.Body.Close())
+	require.Equal(t, http.StatusNotFound, relayed.StatusCode, "a runner without a project configuration receives no relayed events")
 	require.NotContains(t, logs.Text(), "SENTINEL")
 	cancel()
 	select {

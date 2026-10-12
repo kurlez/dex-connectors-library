@@ -271,16 +271,7 @@ var threadApprovalScope = projectconfig.Scope{ProjectID: "slack-thread-approval-
 
 func newThreadApprovalRunnerSetup(t *testing.T, fake *socketModeSlack) *threadApprovalRunnerSetup {
 	t.Helper()
-	configuration := projectconfig.Configuration{TriggerBindings: []projectconfig.TriggerConfiguration{
-		{
-			ConnectorID: slack.ConnectorID, ConnectionName: ConnectionName, TriggerName: "channelThreadCreated", BindingName: StartTriggerBinding,
-			Configuration: json.RawMessage(`{"channelId":"C1","threadTriggerMatcher":{"messageContains":"request approval"}}`),
-		},
-		{
-			ConnectorID: slack.ConnectorID, ConnectionName: ConnectionName, TriggerName: "threadReplyCreated", BindingName: ReplyTriggerBinding,
-			Configuration: json.RawMessage(`{"channelId":"C1","threadReplyMatcher":{"messageContains":"approve","posterUserIds":["U2"]}}`),
-		},
-	}}
+	configuration := projectconfig.Configuration{TriggerBindings: newThreadApprovalBindings()}
 	flow, harness := newSlackIntegrationHarness(t, fake.URL)
 	harness.startWorker(t)
 	logs := testlog.NewLogRecorder()
@@ -291,6 +282,20 @@ func newThreadApprovalRunnerSetup(t *testing.T, fake *socketModeSlack) *threadAp
 	})
 	return &threadApprovalRunnerSetup{
 		configuration: configuration, objects: testsupport.NewObjectStore(), flow: flow, harness: harness, slack: fake, logs: logs,
+	}
+}
+
+// newThreadApprovalBindings configures the start and reply bindings of channel C1.
+func newThreadApprovalBindings() []projectconfig.TriggerConfiguration {
+	return []projectconfig.TriggerConfiguration{
+		{
+			ConnectorID: slack.ConnectorID, ConnectionName: ConnectionName, TriggerName: "channelThreadCreated", BindingName: StartTriggerBinding,
+			Configuration: json.RawMessage(`{"channelId":"C1","threadTriggerMatcher":{"messageContains":"request approval"}}`),
+		},
+		{
+			ConnectorID: slack.ConnectorID, ConnectionName: ConnectionName, TriggerName: "threadReplyCreated", BindingName: ReplyTriggerBinding,
+			Configuration: json.RawMessage(`{"channelId":"C1","threadReplyMatcher":{"messageContains":"approve","posterUserIds":["U2"]}}`),
+		},
 	}
 }
 

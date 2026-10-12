@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -139,13 +141,54 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return errors.Join(err, client.Close(), stopWorker(worker), cache.Close())
 	}
-	err = runUntilStopped(ctx, worker, triggerRunner, client.HealthCheck, logger)
+	// A host that relays Slack events for a connection without an app_token posts them to this path.
+	listener, err := net.Listen("tcp", environmentOr("TRIGGER_BIND_ADDRESS", "127.0.0.1:8839"))
+	if err != nil {
+		return errors.Join(err, client.Close(), stopWorker(worker), cache.Close())
+	}
+	server := &http.Server{Handler: newTriggerMux(triggerRunner), ReadHeaderTimeout: 5 * time.Second}
+	err = runUntilStopped(ctx, server, listener, worker, triggerRunner, client.HealthCheck, logger)
 	return errors.Join(err, client.Close(), stopWorker(worker), cache.Close())
 }
 
-// runUntilStopped waits for the Dex Server, then runs the Worker and the Trigger runner until ctx ends or
-// either one fails. The caller stops the Worker.
+// newTriggerMux serves the relayed Slack events of the example's connection.
+func newTriggerMux(triggerRunner *slack.MessageTriggerRunner) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle(slack.RelayedTriggerPath(threadapproval.ConnectionName), triggerRunner)
+	return mux
+}
+
+// runUntilStopped serves relayed Slack events on listener, which answers 503 until the Trigger runner receives
+// them, waits for the Dex Server, then runs the Worker and the Trigger runner until ctx ends or one of them
+// fails. It shuts the server down; the caller stops the Worker.
 func runUntilStopped(
+	ctx context.Context, server *http.Server, listener net.Listener, worker *dex.Worker, triggerRunner *slack.MessageTriggerRunner,
+	healthCheck func(context.Context) (dex.HealthInfo, error), logger *slog.Logger,
+) error {
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- serveTriggers(server, listener) }()
+	err := runWorkerAndTriggers(ctx, worker, triggerRunner, healthCheck, logger)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if shutdownErr := server.Shutdown(shutdownCtx); errors.Is(shutdownErr, context.DeadlineExceeded) {
+		// Connections still open at the deadline, such as one that never sent a request, are closed.
+		err = errors.Join(err, server.Close())
+	} else if shutdownErr != nil {
+		err = errors.Join(err, shutdownErr)
+	}
+	return errors.Join(err, <-serveResult)
+}
+
+func serveTriggers(server *http.Server, listener net.Listener) error {
+	if err := server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// runWorkerAndTriggers waits for the Dex Server, then runs the Worker and the Trigger runner until ctx ends or
+// either one fails.
+func runWorkerAndTriggers(
 	ctx context.Context, worker *dex.Worker, triggerRunner *slack.MessageTriggerRunner,
 	healthCheck func(context.Context) (dex.HealthInfo, error), logger *slog.Logger,
 ) error {
