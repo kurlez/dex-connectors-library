@@ -61,10 +61,23 @@ func newVersionedStore(dir string) (*versionedStore, error) {
 		}
 		store.objects[stored.Key] = append(store.objects[stored.Key], Object{Key: stored.Key, Version: stored.Version, ETag: stored.ETag, Contents: stored.Contents})
 	}
-	for _, versions := range store.objects {
+	for key, versions := range store.objects {
 		sort.Slice(versions, func(i, j int) bool { return versionNumber(versions[i].Version) < versionNumber(versions[j].Version) })
+		if !keepsHistory(key) {
+			// A crash between writing a new version and deleting the old one leaves both.
+			for _, stale := range versions[:len(versions)-1] {
+				store.remove(stale)
+			}
+			store.objects[key] = versions[len(versions)-1:]
+		}
 	}
 	return store, nil
+}
+
+// keepsHistory reports whether readers address earlier versions of key. Only the pinned configuration snapshot is
+// read by exact version after it is superseded; every other key is read at its current version.
+func keepsHistory(key string) bool {
+	return strings.HasSuffix(key, "/configuration/head")
 }
 
 func versionNumber(version string) int {
@@ -126,15 +139,34 @@ func (store *versionedStore) CompareAndSwapObject(_ context.Context, key, expect
 
 // appendVersion records the next version of key. The caller holds the lock.
 func (store *versionedStore) appendVersion(key string, contents []byte) (Object, error) {
-	version := strconv.Itoa(len(store.objects[key]) + 1)
+	previous := store.objects[key]
+	version := "1"
+	if len(previous) > 0 {
+		version = strconv.Itoa(versionNumber(previous[len(previous)-1].Version) + 1)
+	}
 	object := Object{Key: key, Version: version, ETag: digestBytes(contents) + "-" + version, Contents: append([]byte(nil), contents...)}
 	if store.dir != "" {
 		if err := store.persist(object); err != nil {
 			return Object{}, err
 		}
 	}
-	store.objects[key] = append(store.objects[key], object)
+	if keepsHistory(key) {
+		store.objects[key] = append(previous, object)
+		return copyObject(object), nil
+	}
+	// The new version is durable before the old file goes, so a crash never loses the key.
+	for _, superseded := range previous {
+		store.remove(superseded)
+	}
+	store.objects[key] = []Object{object}
 	return copyObject(object), nil
+}
+
+// remove deletes the file of one superseded version. A failure leaves a stale file that the next load discards.
+func (store *versionedStore) remove(object Object) {
+	if store.dir != "" {
+		_ = os.Remove(store.file(object))
+	}
 }
 
 // persist writes one version through a same-directory temporary file, so a reader never sees a partial file.
@@ -143,8 +175,12 @@ func (store *versionedStore) persist(object Object) error {
 	if err != nil {
 		return errors.New("local project storage encoding failed")
 	}
+	return writePrivateFile(store.file(object), contents)
+}
+
+func (store *versionedStore) file(object Object) string {
 	sum := sha256.Sum256([]byte(object.Key))
-	return writePrivateFile(filepath.Join(store.dir, hex.EncodeToString(sum[:])+"-"+object.Version+".json"), contents)
+	return filepath.Join(store.dir, hex.EncodeToString(sum[:])+"-"+object.Version+".json")
 }
 
 func copyObject(object Object) Object {
