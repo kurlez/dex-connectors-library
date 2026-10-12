@@ -122,3 +122,9 @@ func TestReleaseMatrixKeepsTheHostKeptCredentialsOfAReleaseThatPublishedThem(t *
 		})
 	}
 }
+
+// A moved rule file would silently stop the host-kept comparison, because every release would look older than it.
+func TestTheHostKeptCredentialRuleIsWhereReleasesAreChecked(t *testing.T) {
+	_, err := os.Stat(filepath.Join("..", "..", filepath.FromSlash(hostKeptCredentialRulePath)))
+	require.NoError(t, err)
+}
