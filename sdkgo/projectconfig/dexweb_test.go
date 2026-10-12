@@ -229,3 +229,22 @@ func TestLocalConnectionsFileRejectsUnsafeOrAmbiguousSetup(t *testing.T) {
 
 	require.Error(t, load(filepath.Join(t.TempDir(), "missing.json")))
 }
+
+func TestLocalStoreKeepsOnlyCurrentInboxVersion(t *testing.T) {
+	directory := t.TempDir()
+	future := time.Now().Add(time.Hour)
+	path := writeDexWebFiles(t, directory, "access-1", &future)
+	inbox, err := loadLocal(t, path).TriggerInbox(projectconfig.TriggerInboxKey{ConnectorID: "example", ConnectionName: "main", TriggerName: "messageCreated", BindingName: "inbound"})
+	require.NoError(t, err)
+	for cycle := 0; cycle < 50; cycle++ {
+		event := projectconfig.PendingTriggerEvent{ID: "event-" + string(rune('a'+cycle%26)) + string(rune('a'+cycle/26)), Event: json.RawMessage(`{}`)}
+		require.NoError(t, inbox.Add(context.Background(), event))
+		require.NoError(t, inbox.Remove(context.Background(), event.ID))
+	}
+	files, err := filepath.Glob(filepath.Join(directory, "trigger-inboxes", "*.json"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	pending, err := inbox.Pending(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, pending)
+}
