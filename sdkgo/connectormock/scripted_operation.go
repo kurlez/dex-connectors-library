@@ -149,11 +149,15 @@ func (scripted *scriptedOperation[IN, OUT]) answer(call sdkgo.Call, input IN, id
 		IsReplay: resolved.isReplay, IsUnscripted: resolved.isUnscripted,
 	}
 	scripted.calls = append(scripted.calls, recorded)
-	recordProcessCall(RecordedCall{
+	processCall := RecordedCall{
 		ConnectorID: scripted.operation.ConnectorID, OperationID: scripted.operation.OperationID,
 		ConnectionName: call.Connection.Name, FlowID: flowID, CallID: call.ID,
 		Branch: recorded.Branch, IsRetry: recorded.IsRetry, IsReplay: recorded.IsReplay, IsUnscripted: recorded.IsUnscripted,
-	})
+	}
+	recordProcessCall(processCall)
+	if err := appendToReport(processCall); err != nil {
+		scripted.reportFailure(err.Error())
+	}
 	return resolved
 }
 
