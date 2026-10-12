@@ -146,6 +146,46 @@ func TestReleaseArtifactIsDeterministicAndVersioned(t *testing.T) {
 	require.ErrorContains(t, releaseArtifact(mismatchedArguments), "does not match manifest version")
 }
 
+func TestReleaseArtifactPublishesTheHostKeptCredentialsOfEveryMethod(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		manifest string
+		expected []connectorReleaseAuthMethod
+	}{
+		"methods with every grant": {manifest: "token-grants.yaml", expected: []connectorReleaseAuthMethod{
+			{ID: "user-oauth", HostKeptCredentials: []string{"client_secret", "refresh_token"}},
+			{ID: "bot-oauth", HostKeptCredentials: []string{"client_secret", "bot_refresh_token", "user_refresh_token"}},
+			{ID: "app-only", HostKeptCredentials: []string{"client_secret"}},
+			{ID: "delegation", HostKeptCredentials: []string{"service_account_key"}},
+			{ID: "jwt-bearer", HostKeptCredentials: []string{"private_key"}},
+		}},
+		"a single method that keeps nothing": {manifest: "google-oauth.yaml", expected: []connectorReleaseAuthMethod{
+			{ID: "", HostKeptCredentials: []string{}},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			manifestPath := filepath.Join("..", "..", "schema", "testdata", testCase.manifest)
+			manifest, err := load(manifestPath)
+			require.NoError(t, err)
+			output := filepath.Join(t.TempDir(), "connector-release.json")
+			require.NoError(t, releaseArtifact([]string{
+				"--manifest", manifestPath, "--module-path", "example.com/connectors/fixture", "--version", manifest.Metadata.Version,
+				"--tag", "connectors/fixture/" + manifest.Metadata.Version, "--source-sha", strings.Repeat("a", 40),
+				"--output", output, "--digest-output", output + ".sha256",
+			}))
+			contents, err := os.ReadFile(output)
+			require.NoError(t, err)
+			var published struct {
+				AuthMethods []connectorReleaseAuthMethod `json:"authMethods"`
+			}
+			require.NoError(t, json.Unmarshal(contents, &published))
+			require.Equal(t, testCase.expected, published.AuthMethods)
+			if testCase.manifest == "google-oauth.yaml" {
+				require.Contains(t, string(contents), `"hostKeptCredentials": []`, "a method that keeps nothing says so")
+			}
+		})
+	}
+}
+
 func TestGeneratedConnectorsAreCurrent(t *testing.T) {
 	for _, directory := range registeredConnectorDirectories(t) {
 		path := filepath.Join("..", "..", filepath.FromSlash(directory), "connector.yaml")

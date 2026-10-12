@@ -82,6 +82,16 @@ type connectorReleaseArtifact struct {
 	SourceSHA      string              `json:"sourceSha"`
 	ManifestSHA256 string              `json:"manifestSha256"`
 	UI             *connectorUIRelease `json:"ui,omitempty"`
+	// AuthMethods lists every authentication method with the credential fields that a host keeps from applications.
+	// A host reads them here instead of deriving them from the manifest again.
+	AuthMethods []connectorReleaseAuthMethod `json:"authMethods"`
+}
+
+type connectorReleaseAuthMethod struct {
+	// ID is the method ID, empty for a manifest whose spec.auth is its only method.
+	ID string `json:"id"`
+	// HostKeptCredentials are schema.HostKeptCredentials of the method, an empty list when the host keeps none.
+	HostKeptCredentials []string `json:"hostKeptCredentials"`
 }
 
 type connectorUIRelease struct {
@@ -127,6 +137,13 @@ func releaseArtifact(args []string) error {
 	artifact := connectorReleaseArtifact{
 		ConnectorID: manifest.Metadata.Name, Manifest: manifest, ModulePath: *modulePath,
 		Version: *version, Tag: *tag, SourceSHA: *sourceSHA, ManifestSHA256: manifestDigest,
+	}
+	for _, method := range manifest.Spec.Auth.AuthMethods() {
+		hostKept := schema.HostKeptCredentials(method)
+		if hostKept == nil {
+			hostKept = []string{}
+		}
+		artifact.AuthMethods = append(artifact.AuthMethods, connectorReleaseAuthMethod{ID: method.ID, HostKeptCredentials: hostKept})
 	}
 	if (*uiArtifactPath == "") != (*uiDigestPath == "") {
 		return errors.New("ui-artifact and ui-digest must be provided together")
