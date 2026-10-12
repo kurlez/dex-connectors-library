@@ -163,6 +163,20 @@ func TestConnectionCompatibilityKeepsTheScopesOfDeclaredMintingGrants(t *testing
 		"a release that first declares a grant establishes its scopes")
 }
 
+func TestHostKeptCredentialCompatibilityKeepsEveryMethodsHostKeptFields(t *testing.T) {
+	released := decodeFixture(t, "token-grants.yaml")
+	require.NoError(t, schema.ValidateHostKeptCredentialCompatibility(released, decodeFixture(t, "token-grants.yaml")))
+
+	withoutMinting := decodeFixture(t, "token-grants.yaml")
+	withoutMinting.Spec.Auth.Methods[2].ClientCredentials = nil
+	withoutMinting.Spec.Auth.Methods[4].ServiceAccount = nil
+	require.NoError(t, schema.ValidateConnectionCompatibility(released, withoutMinting), "grant scopes are compared only while both releases declare the grant")
+	require.EqualError(t, schema.ValidateHostKeptCredentialCompatibility(released, withoutMinting),
+		"connection contract changes: auth method app-only host-kept credentials remove client_secret; auth method jwt-bearer host-kept credentials remove private_key")
+	require.EqualError(t, schema.ValidateHostKeptCredentialCompatibility(withoutMinting, released),
+		"connection contract changes: auth method app-only host-kept credentials add client_secret; auth method jwt-bearer host-kept credentials add private_key")
+}
+
 func TestConnectionCompatibilityResolvesASingleMethodThroughTheDefaultMethod(t *testing.T) {
 	released := decodeFixture(t, "google-oauth.yaml")
 	const methods = `  auth:

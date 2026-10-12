@@ -34,10 +34,31 @@ func DecodeReleasedManifest(reader io.Reader) (Manifest, error) {
 //     no field is removed, renamed, retyped, made required or loses an enum value.
 //
 // A candidate may add an authentication method. A single-method spec.auth has the empty method ID, which a
-// candidate with methods resolves through its defaultMethod. The error lists every break.
+// candidate with methods resolves through its defaultMethod. The error lists every break. A release that published
+// host-kept credentials also keeps them; see ValidateHostKeptCredentialCompatibility.
 func ValidateConnectionCompatibility(released, candidate Manifest) error {
 	breaks := findAuthMethodBreaks(released.Spec.Auth, candidate.Spec.Auth)
 	breaks = append(breaks, findSettingBreaks("spec.configuration", released.Spec.Configuration.Fields, candidate.Spec.Configuration.Fields)...)
+	if len(breaks) == 0 {
+		return nil
+	}
+	return fmt.Errorf("connection contract changes: %s", strings.Join(breaks, "; "))
+}
+
+// ValidateHostKeptCredentialCompatibility checks that every authentication method of released keeps exactly its
+// HostKeptCredentials in candidate. A host strips them from a shared connection's credential by the declarations of
+// the latest release, so a change breaks the applications of released: a field that candidate also keeps is missing
+// from a credential that released decodes, and a field that it stops keeping reaches applications that released
+// promised it would not. Apply it to a release that published host-kept credentials; the error lists every break.
+func ValidateHostKeptCredentialCompatibility(released, candidate Manifest) error {
+	var breaks []string
+	for _, pair := range pairConnectionMethods(released.Spec.Auth, candidate.Spec.Auth) {
+		if pair.candidate == nil {
+			continue
+		}
+		breaks = append(breaks, findScopeBreaks(pair.released.label+" host-kept credentials",
+			HostKeptCredentials(pair.released.method), HostKeptCredentials(pair.candidate.method))...)
+	}
 	if len(breaks) == 0 {
 		return nil
 	}
@@ -56,6 +77,24 @@ func findAuthMethodBreaks(released, candidate Auth) []string {
 		breaks = append(breaks, fmt.Sprintf("spec.auth.defaultMethod changes from %s to %s, which changes the method of credentials saved without one",
 			released.DefaultMethod, candidate.DefaultMethod))
 	}
+	for _, pair := range pairConnectionMethods(released, candidate) {
+		if pair.candidate == nil {
+			breaks = append(breaks, pair.released.label+" is removed")
+			continue
+		}
+		breaks = append(breaks, findMethodBreaks(pair.released, *pair.candidate)...)
+	}
+	return breaks
+}
+
+// connectionMethodPair is a released method and the candidate method that serves its connections, nil if removed.
+type connectionMethodPair struct {
+	released  connectionMethod
+	candidate *connectionMethod
+}
+
+func pairConnectionMethods(released, candidate Auth) []connectionMethodPair {
+	var pairs []connectionMethodPair
 	candidateMethods := connectionMethodsByID(candidate)
 	for _, releasedMethod := range connectionMethodsInOrder(released) {
 		candidateID := releasedMethod.method.ID
@@ -63,14 +102,13 @@ func findAuthMethodBreaks(released, candidate Auth) []string {
 			candidateID = candidate.DefaultMethod
 			releasedMethod.label = "spec.auth, now auth method " + candidateID + ","
 		}
-		candidateMethod, found := candidateMethods[candidateID]
-		if !found {
-			breaks = append(breaks, releasedMethod.label+" is removed")
-			continue
+		pair := connectionMethodPair{released: releasedMethod}
+		if candidateMethod, found := candidateMethods[candidateID]; found {
+			pair.candidate = &candidateMethod
 		}
-		breaks = append(breaks, findMethodBreaks(releasedMethod, candidateMethod)...)
+		pairs = append(pairs, pair)
 	}
-	return breaks
+	return pairs
 }
 
 func findMethodBreaks(released, candidate connectionMethod) []string {
