@@ -178,6 +178,9 @@ func releaseArtifact(args []string) error {
 		return fmt.Errorf("encode release artifact: %w", err)
 	}
 	encoded = append(encoded, '\n')
+	if err := verifyReleaseAuthMethods(encoded, manifest); err != nil {
+		return err
+	}
 	if err := os.WriteFile(*output, encoded, 0o644); err != nil {
 		return fmt.Errorf("write release artifact: %w", err)
 	}

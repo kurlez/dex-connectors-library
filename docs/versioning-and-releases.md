@@ -43,6 +43,10 @@ A connector pull request that should release moves only that connector's
 
 A new connector declares `v0.1.0` for its first release.
 
+Every version that a connector's README files pin for its own module, such as
+`go get` commands, example tag URLs, and the `release-artifact` command's
+`--version` and `--tag`, stays on the manifest version. A test enforces it.
+
 `connectorctl` and the release workflow reject a version that is not a stable
 semantic version or is behind the connector's latest reachable tag, a release
 that breaks connections without a major bump, and a `(breaking)` release with
@@ -224,6 +228,13 @@ module path, release version and tag, source SHA, source manifest digest, and
 optional Studio UI artifact identity and compatibility metadata.
 SuperVerse Catalog consumes that artifact instead of inferring a version from
 source files.
+
+The artifact lists every authentication method under `authMethods` with its
+`hostKeptCredentials`, an empty array `[]` for a method whose host keeps
+nothing. `connectorctl release-artifact` fails the release build when an
+entry is missing, has no `hostKeptCredentials`, or has `null` instead of an
+array, so every release, candidate, and compatibility build carries the key. A
+host fails closed on a release without it.
 
 Breaking changes use the exact lowercase `(breaking)` marker in a PR title,
 PR body, or direct commit message. A v0 breaking release cannot use a patch

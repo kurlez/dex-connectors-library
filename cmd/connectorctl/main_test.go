@@ -453,3 +453,82 @@ func TestGenerateCheckDetectsDrift(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(directory, "zz_generated_connector.go"), []byte("stale"), 0o600))
 	require.ErrorContains(t, generate([]string{"--check", manifest}), "stale")
 }
+
+func TestReleaseArtifactGateRequiresHostKeptCredentialsOnEveryMethod(t *testing.T) {
+	manifest, err := load(filepath.Join("..", "..", "schema", "testdata", "token-grants.yaml"))
+	require.NoError(t, err)
+	declared := manifest.Spec.Auth.AuthMethods()
+	require.Greater(t, len(declared), 1)
+	encode := func(entries []map[string]any) []byte {
+		encoded, encodeErr := json.Marshal(map[string]any{"authMethods": entries})
+		require.NoError(t, encodeErr)
+		return encoded
+	}
+	valid := func() []map[string]any {
+		var entries []map[string]any
+		for _, method := range declared {
+			kept := schema.HostKeptCredentials(method)
+			if kept == nil {
+				kept = []string{}
+			}
+			entries = append(entries, map[string]any{"id": method.ID, "hostKeptCredentials": kept})
+		}
+		return entries
+	}
+	require.NoError(t, verifyReleaseAuthMethods(encode(valid()), manifest))
+
+	emptied := valid()
+	emptied[0]["hostKeptCredentials"] = []string{}
+	require.NoError(t, verifyReleaseAuthMethods(encode(emptied), manifest), "an empty list is allowed; the key is not")
+
+	for name, testCase := range map[string]struct {
+		mutate func([]map[string]any) []map[string]any
+		want   string
+	}{
+		"key omitted": {func(entries []map[string]any) []map[string]any {
+			delete(entries[1], "hostKeptCredentials")
+			return entries
+		}, "has no hostKeptCredentials"},
+		"null instead of an empty list": {func(entries []map[string]any) []map[string]any {
+			entries[1]["hostKeptCredentials"] = nil
+			return entries
+		}, "want an array"},
+		"method missing": {func(entries []map[string]any) []map[string]any { return entries[:len(entries)-1] }, "manifest declares"},
+		"method renamed": {func(entries []map[string]any) []map[string]any {
+			entries[0]["id"] = "other"
+			return entries
+		}, "id is"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.ErrorContains(t, verifyReleaseAuthMethods(encode(testCase.mutate(valid())), manifest), testCase.want)
+		})
+	}
+	require.ErrorContains(t, verifyReleaseAuthMethods([]byte(`{}`), manifest), "no authMethods")
+}
+
+func TestEveryRegisteredConnectorReleasesHostKeptCredentialsOnEveryMethod(t *testing.T) {
+	directory := t.TempDir()
+	uiArtifact := filepath.Join(directory, "connector-ui.tgz")
+	require.NoError(t, os.WriteFile(uiArtifact, []byte("ui"), 0o644))
+	uiDigest := uiArtifact + ".sha256"
+	require.NoError(t, os.WriteFile(uiDigest, []byte(fmt.Sprintf("%x  connector-ui.tgz\n", sha256.Sum256([]byte("ui")))), 0o644))
+	for _, connectorDirectory := range registeredConnectorDirectories(t) {
+		manifestPath := filepath.Join("..", "..", filepath.FromSlash(connectorDirectory), "connector.yaml")
+		manifest, err := load(manifestPath)
+		require.NoError(t, err, connectorDirectory)
+		output := filepath.Join(directory, strings.ReplaceAll(connectorDirectory, "/", "-")+".json")
+		arguments := []string{
+			"--manifest", manifestPath, "--module-path", "example.com/" + connectorDirectory, "--version", manifest.Metadata.Version,
+			"--tag", connectorDirectory + "/" + manifest.Metadata.Version, "--source-sha", strings.Repeat("a", 40),
+			"--output", output, "--digest-output", output + ".sha256",
+		}
+		if manifest.Spec.Studio != nil {
+			arguments = append(arguments, "--ui-artifact", uiArtifact, "--ui-digest", uiDigest)
+		}
+		require.NoError(t, releaseArtifact(arguments), connectorDirectory)
+		contents, err := os.ReadFile(output)
+		require.NoError(t, err)
+		require.NoError(t, verifyReleaseAuthMethods(contents, manifest), connectorDirectory)
+		require.NotContains(t, string(contents), `"hostKeptCredentials": null`, connectorDirectory)
+	}
+}
