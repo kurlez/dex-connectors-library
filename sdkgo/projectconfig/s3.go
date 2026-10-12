@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -35,6 +36,9 @@ type S3StoreConfig struct {
 	AllowUnencrypted bool
 }
 
+// ErrBucketVersioningRequired reports a project object bucket whose versioning is not enabled.
+var ErrBucketVersioningRequired = errors.New("project object bucket versioning must be enabled")
+
 // S3ObjectStore implements durable conditional writes against a versioned S3 or MinIO bucket.
 type S3ObjectStore struct {
 	client                 *s3.Client
@@ -55,8 +59,16 @@ func NewS3ObjectStore(ctx context.Context, config *S3StoreConfig) (*S3ObjectStor
 		prefix += "/"
 	}
 	versioning, err := config.Client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{Bucket: aws.String(config.Bucket)})
-	if err != nil || versioning == nil || versioning.Status != types.BucketVersioningStatusEnabled {
-		return nil, errors.New("project object bucket versioning must be enabled")
+	if err != nil {
+		// The cause, such as AccessDenied for credentials without s3:GetBucketVersioning, says what to fix.
+		return nil, fmt.Errorf("read the versioning of project object bucket %s: %w", config.Bucket, err)
+	}
+	if versioning == nil || versioning.Status != types.BucketVersioningStatusEnabled {
+		status := "never enabled"
+		if versioning != nil && versioning.Status != "" {
+			status = string(versioning.Status)
+		}
+		return nil, fmt.Errorf("%w: bucket %s versioning is %s", ErrBucketVersioningRequired, config.Bucket, status)
 	}
 	return &S3ObjectStore{client: config.Client, bucket: config.Bucket, prefix: prefix, kmsKey: config.KMSKeyID, allowUnencrypted: config.AllowUnencrypted}, nil
 }
