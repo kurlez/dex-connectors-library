@@ -16,13 +16,20 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/superdurable/dex-connectors-library/sdkgo/internal/projectload"
 )
+
+func init() {
+	projectload.LoadFromObjectStore = loadProjectFromObjectStore
+}
 
 // LoadedProject contains an immutable ordinary configuration snapshot and independently resolved current credentials.
 type LoadedProject struct {
 	objects        ObjectStore
 	scope          Scope
 	configurations *ConfigurationStore
+	// broker is the credential broker client, or nil when the document declares no credentialBroker.
+	broker *credentialBroker
 	// Connections resolves private credential material through the fixed project boundary, and a shared entry's
 	// credential through the credential broker.
 	Connections *ConnectionStore
@@ -75,6 +82,15 @@ func LoadFromEnvironment(ctx context.Context) (*LoadedProject, error) {
 	return loadProject(ctx, objects, scope, reference, brokerClientOptions{})
 }
 
+// loadProjectFromObjectStore serves projectconfigtest.LoadProject. It skips LoadFromEnvironment's storage-target
+// checks, which guard building the S3 store, so it is not exported.
+func loadProjectFromObjectStore(ctx context.Context, objects ObjectStore, scope Scope, reference SnapshotRef) (*LoadedProject, error) {
+	if objects == nil {
+		return nil, errors.New("project object store is required")
+	}
+	return loadProject(ctx, objects, scope, reference, brokerClientOptions{})
+}
+
 // brokerClientOptions let tests replace the broker client's HTTP client and clock.
 type brokerClientOptions struct {
 	httpClient *http.Client
@@ -91,15 +107,23 @@ func loadProject(ctx context.Context, objects ObjectStore, scope Scope, referenc
 	if err != nil {
 		return nil, err
 	}
+	if options.now == nil {
+		options.now = time.Now
+	}
 	storeConfig := &ConnectionStoreConfig{Objects: objects, Scope: scope}
+	var broker *credentialBroker
 	if configuration.CredentialBroker != nil {
-		storeConfig.sharedConnections = &sharedConnectionsConfig{configuration: configuration, configurations: configurations, httpClient: options.httpClient, now: options.now}
+		broker = newCredentialBroker(*configuration.CredentialBroker, configurations, options.httpClient, options.now)
+		storeConfig.sharedConnections = &sharedConnectionsConfig{configuration: configuration, broker: broker, now: options.now}
 	}
 	connections, err := NewConnectionStore(storeConfig)
 	if err != nil {
 		return nil, err
 	}
-	return &LoadedProject{objects: objects, scope: scope, configurations: configurations, Connections: connections, Configuration: configuration, Snapshot: reference}, nil
+	return &LoadedProject{
+		objects: objects, scope: scope, configurations: configurations, broker: broker,
+		Connections: connections, Configuration: configuration, Snapshot: reference,
+	}, nil
 }
 
 // TriggerInbox binds one Trigger binding's durable inbox in the loaded project scope.

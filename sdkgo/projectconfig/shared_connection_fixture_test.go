@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	brokerPath      = "/internal/connection-credentials/read"
-	scopeToken      = "scope-token"
-	sharedAccessOne = "access-secret-1"
+	brokerPath       = "/internal/connection-credentials/read"
+	registrationPath = "/internal/relayed-triggers/register"
+	scopeToken       = "scope-token"
+	sharedAccessOne  = "access-secret-1"
 )
 
 var (
@@ -209,8 +210,10 @@ type sharedFixture struct {
 	objects        *recordingObjectStore
 	configurations *projectconfig.ConfigurationStore
 	broker         *testBroker
-	server         *httptest.Server
-	project        *projectconfig.LoadedProject
+	// registrar serves registrationPath on the broker's origin.
+	registrar *testBroker
+	server    *httptest.Server
+	project   *projectconfig.LoadedProject
 	// allowsStoredConnections lets a test that exercises an ordinary entry touch connections/*.
 	allowsStoredConnections bool
 }
@@ -233,10 +236,12 @@ func warmedSharedFixture(t *testing.T, scope projectconfig.Scope, first brokerRe
 // newUnreadSharedFixture loads the project and proves that loading does not read the broker.
 func newUnreadSharedFixture(t *testing.T, scope projectconfig.Scope, first brokerReply) *sharedFixture {
 	t.Helper()
-	fixture := &sharedFixture{scope: scope, clock: &testClock{now: epoch}, objects: &recordingObjectStore{inner: testsupport.NewObjectStore()}, broker: &testBroker{}}
+	fixture := &sharedFixture{scope: scope, clock: &testClock{now: epoch}, objects: &recordingObjectStore{inner: testsupport.NewObjectStore()}, broker: &testBroker{}, registrar: &testBroker{}}
 	fixture.broker.respondAlways(first)
+	fixture.registrar.respondAlways(statusReply("REGISTERED"))
 	mux := http.NewServeMux()
 	mux.Handle(brokerPath, fixture.broker)
+	mux.Handle(registrationPath, fixture.registrar)
 	fixture.server = httptest.NewServer(mux)
 	t.Cleanup(fixture.server.Close)
 	t.Cleanup(func() {

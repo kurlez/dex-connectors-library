@@ -304,7 +304,10 @@ func TestNewEndpointRejectsIncompleteConfiguration(t *testing.T) {
 		"missing connection": func(config *webhooktrigger.EndpointConfig[testCredentials, orderEvent]) {
 			config.Connection = sdkgo.ConnectionRef{}
 		},
-		"missing verifier":        func(config *webhooktrigger.EndpointConfig[testCredentials, orderEvent]) { config.VerifyRequest = nil },
+		"missing verifier": func(config *webhooktrigger.EndpointConfig[testCredentials, orderEvent]) { config.VerifyRequest = nil },
+		"two verifiers": func(config *webhooktrigger.EndpointConfig[testCredentials, orderEvent]) {
+			config.VerifyRequestContext = func(context.Context, webhooktrigger.Request, testCredentials) error { return nil }
+		},
 		"non-positive body limit": func(config *webhooktrigger.EndpointConfig[testCredentials, orderEvent]) { config.MaxBodyBytes = 0 },
 		"negative queue capacity": func(config *webhooktrigger.EndpointConfig[testCredentials, orderEvent]) {
 			config.SourceQueueCapacity = -1
@@ -326,6 +329,49 @@ func TestNewEndpointRejectsIncompleteConfiguration(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+type requestContextKey struct{}
+
+func TestEndpointVerifiesWithTheRequestContextWhenConfigured(t *testing.T) {
+	var verifiedSecrets []string
+	endpoint := newTestEndpoint(t, func(config *webhooktrigger.EndpointConfig[testCredentials, orderEvent]) {
+		config.VerifyRequest = nil
+		config.VerifyRequestContext = func(ctx context.Context, request webhooktrigger.Request, credentials testCredentials) error {
+			require.Equal(t, "request-scoped", ctx.Value(requestContextKey{}), "the verifier receives the request's context")
+			secret := request.Header.Get("X-Test-Secret")
+			verifiedSecrets = append(verifiedSecrets, secret)
+			switch secret {
+			case credentials.secret:
+				return nil
+			case "rotating":
+				return fmt.Errorf("signing key is being read: %w", webhooktrigger.ErrVerificationUnavailable)
+			default:
+				return errors.New("signature mismatch")
+			}
+		}
+	})
+	target := newRecordingTarget()
+	runSource(t, endpoint, endpoint.NewSource(nil), target)
+	for _, test := range []struct {
+		secret       string
+		expectedCode int
+	}{
+		{secret: "signing-secret", expectedCode: http.StatusOK},
+		{secret: "rotating", expectedCode: http.StatusServiceUnavailable},
+		{secret: "wrong", expectedCode: http.StatusBadRequest},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/webhooks/orders", strings.NewReader("evt-"+test.secret+":paid"))
+		request = request.WithContext(context.WithValue(request.Context(), requestContextKey{}, "request-scoped"))
+		request.Header.Set("X-Test-Secret", test.secret)
+		response := httptest.NewRecorder()
+		endpoint.ServeHTTP(response, request)
+		require.Equal(t, test.expectedCode, response.Code, test.secret)
+		require.NotContains(t, response.Body.String(), "signature mismatch")
+	}
+	require.Equal(t, []string{"signing-secret", "rotating", "wrong"}, verifiedSecrets)
+	require.Equal(t, "evt-signing-secret", receiveHandled(t, target).ID)
+	require.Equal(t, []string{"evt-signing-secret"}, target.preparedIDs(), "only the verified request is recorded")
 }
 
 // retryOnceTarget fails its first delivery so DeliverTrigger logs a retry record.

@@ -8,7 +8,7 @@
 // that makes delivery durable:
 //
 //  1. accept only POST and read the body within MaxBodyBytes;
-//  2. resolve the connection's credentials and call VerifyRequest;
+//  2. resolve the connection's credentials and call VerifyRequest or VerifyRequestContext;
 //  3. call DecodeEvent, acknowledging an event no binding handles;
 //  4. call sdkgo.PrepareTriggerDelivery for every active source that accepts the event, so each
 //     binding's durable inbox records it;
@@ -85,8 +85,11 @@ type EndpointConfig[C any, T any] struct {
 	// MaxBodyBytes is the largest accepted body in bytes. It must be positive.
 	MaxBodyBytes int64
 	// VerifyRequest authenticates a request. Wrap ErrVerificationUnavailable for a retryable failure.
-	// Error text never reaches the provider.
+	// Error text never reaches the provider. Set exactly one of VerifyRequest and VerifyRequestContext.
 	VerifyRequest func(Request, C) error
+	// VerifyRequestContext is VerifyRequest with the request's context, for a check that may read remote
+	// state, such as a signing key that can rotate. Its errors are answered like VerifyRequest's.
+	VerifyRequestContext func(context.Context, Request, C) error
 	// DecodeEvent decodes a verified request into an event with a stable provider ID. It returns false,
 	// without an error, for a valid event that no binding of this Trigger handles.
 	DecodeEvent func(Request) (sdkgo.TriggerEvent[T], bool, error)
@@ -128,8 +131,8 @@ func NewEndpoint[C any, T any](config EndpointConfig[C, T]) (*Endpoint[C, T], er
 		return nil, errors.New("webhook endpoint connector ID and Trigger name are required")
 	case strings.TrimSpace(config.Connection.Name) == "":
 		return nil, errors.New("webhook endpoint connection name is required")
-	case config.Credentials == nil || config.VerifyRequest == nil || config.DecodeEvent == nil:
-		return nil, errors.New("webhook endpoint credentials, VerifyRequest, and DecodeEvent are required")
+	case config.Credentials == nil || config.DecodeEvent == nil || (config.VerifyRequest == nil) == (config.VerifyRequestContext == nil):
+		return nil, errors.New("webhook endpoint credentials, DecodeEvent, and exactly one of VerifyRequest and VerifyRequestContext are required")
 	case config.MaxBodyBytes <= 0:
 		return nil, errors.New("webhook endpoint MaxBodyBytes must be positive")
 	case config.SourceQueueCapacity < 0:
@@ -186,7 +189,7 @@ func (endpoint *Endpoint[C, T]) ServeHTTP(response http.ResponseWriter, request 
 		http.Error(response, "webhook temporarily unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	if err := endpoint.config.VerifyRequest(received, credentials); err != nil {
+	if err := endpoint.verifyRequest(request.Context(), received, credentials); err != nil {
 		if errors.Is(err, ErrVerificationUnavailable) {
 			http.Error(response, "webhook temporarily unavailable", http.StatusServiceUnavailable)
 			return
@@ -284,6 +287,13 @@ func (endpoint *Endpoint[C, T]) recordAndQueue(ctx context.Context, event sdkgo.
 		}
 	}
 	return nil
+}
+
+func (endpoint *Endpoint[C, T]) verifyRequest(ctx context.Context, received Request, credentials C) error {
+	if endpoint.config.VerifyRequestContext != nil {
+		return endpoint.config.VerifyRequestContext(ctx, received, credentials)
+	}
+	return endpoint.config.VerifyRequest(received, credentials)
 }
 
 func (endpoint *Endpoint[C, T]) resolveCredentials(ctx context.Context, contents []byte) (C, error) {

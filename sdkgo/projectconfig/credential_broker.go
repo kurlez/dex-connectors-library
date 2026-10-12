@@ -80,58 +80,70 @@ type credentialBrokerAnswer struct {
 	credential brokerCredential
 }
 
-// credentialBroker is the HTTP client of the broker's credential read endpoint.
+// credentialBroker is the HTTP client of the broker's credential read endpoint and of the other endpoints on its origin.
 type credentialBroker struct {
 	endpoint       string
 	httpClient     *http.Client
 	configurations *ConfigurationStore
-	tokenReference ApplicationSecretRef
+	now            func() time.Time
 
-	tokenMutex sync.Mutex
-	token      string
+	tokenMutex     sync.Mutex
+	tokenReference ApplicationSecretRef
+	token          string
+	// lastMismatchRenewal is when a relayed request's signature mismatch last renewed the token.
+	lastMismatchRenewal time.Time
 }
 
-func newCredentialBroker(configuration CredentialBrokerConfiguration, configurations *ConfigurationStore, httpClient *http.Client) *credentialBroker {
+func newCredentialBroker(configuration CredentialBrokerConfiguration, configurations *ConfigurationStore, httpClient *http.Client, now func() time.Time) *credentialBroker {
 	if httpClient == nil {
 		httpClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	return &credentialBroker{endpoint: configuration.Endpoint, httpClient: httpClient, configurations: configurations, tokenReference: configuration.TokenSecretRef}
+	return &credentialBroker{endpoint: configuration.Endpoint, httpClient: httpClient, configurations: configurations, now: now, tokenReference: configuration.TokenSecretRef}
 }
 
 // read asks the broker for one shared connection. A timeout is ErrCredentialBrokerUnavailable.
-// When the broker refuses the scope token with HTTP 401, read renews the token once and asks again.
 // Errors never contain the scope token or the response.
 func (broker *credentialBroker) read(ctx context.Context, sharedConnectionID string, rejectedRevision uint64) (credentialBrokerAnswer, error) {
-	token, err := broker.bearerToken(ctx)
-	if err != nil {
-		return credentialBrokerAnswer{}, fmt.Errorf("credential broker token: %w", err)
-	}
 	body, err := json.Marshal(credentialBrokerRequest{SharedConnectionID: sharedConnectionID, RejectedRevision: rejectedRevision})
 	if err != nil {
 		return credentialBrokerAnswer{}, errors.New("credential broker request encoding failed")
 	}
-	answer, isTokenRefused, err := broker.post(ctx, token, body)
+	contents, err := broker.exchange(ctx, broker.endpoint, body)
+	if err != nil {
+		return credentialBrokerAnswer{}, err
+	}
+	return decodeCredentialBrokerAnswer(contents)
+}
+
+// exchange posts body to target with the scope token and returns the body of an HTTP 200 answer. When the broker
+// refuses the scope token with HTTP 401, it renews the token once and asks again.
+func (broker *credentialBroker) exchange(ctx context.Context, target string, body []byte) ([]byte, error) {
+	token, err := broker.bearerToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("credential broker token: %w", err)
+	}
+	contents, isTokenRefused, err := broker.post(ctx, target, token, body)
 	if !isTokenRefused {
-		return answer, err
+		return contents, err
 	}
 	renewed, renewErr := broker.renewBearerToken(ctx, token)
 	if renewErr != nil {
-		return credentialBrokerAnswer{}, errors.Join(err, fmt.Errorf("credential broker token renewal: %w", renewErr))
+		return nil, errors.Join(err, fmt.Errorf("credential broker token renewal: %w", renewErr))
 	}
 	if renewed == token {
-		return credentialBrokerAnswer{}, err
+		return nil, err
 	}
-	answer, _, err = broker.post(ctx, renewed, body)
-	return answer, err
+	contents, _, err = broker.post(ctx, target, renewed, body)
+	return contents, err
 }
 
 // post sends one request and reports whether the broker refused the scope token with HTTP 401.
-func (broker *credentialBroker) post(ctx context.Context, token string, body []byte) (answer credentialBrokerAnswer, isTokenRefused bool, err error) {
+func (broker *credentialBroker) post(ctx context.Context, target string, token string, body []byte) (contents []byte, isTokenRefused bool, err error) {
 	requestContext, cancel := context.WithTimeout(ctx, credentialBrokerReadTimeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(requestContext, http.MethodPost, broker.endpoint, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(requestContext, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
-		return credentialBrokerAnswer{}, false, fmt.Errorf("%w: request could not be built", ErrCredentialBrokerRejected)
+		return nil, false, fmt.Errorf("%w: request could not be built", ErrCredentialBrokerRejected)
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
@@ -139,27 +151,29 @@ func (broker *credentialBroker) post(ctx context.Context, token string, body []b
 	response, err := broker.httpClient.Do(request)
 	if err != nil {
 		if ctx.Err() != nil {
-			return credentialBrokerAnswer{}, false, ctx.Err()
+			return nil, false, ctx.Err()
 		}
-		return credentialBrokerAnswer{}, false, fmt.Errorf("%w: %w", ErrCredentialBrokerUnavailable, err)
+		return nil, false, fmt.Errorf("%w: %w", ErrCredentialBrokerUnavailable, err)
 	}
 	contents, readErr := io.ReadAll(io.LimitReader(response.Body, maximumCredentialBrokerResponseBytes+1))
 	closeErr := response.Body.Close()
 	switch {
 	case response.StatusCode == http.StatusOK:
 	case isTransientBrokerStatus(response.StatusCode):
-		return credentialBrokerAnswer{}, false, fmt.Errorf("%w: HTTP %d", ErrCredentialBrokerUnavailable, response.StatusCode)
+		return nil, false, fmt.Errorf("%w: HTTP %d", ErrCredentialBrokerUnavailable, response.StatusCode)
 	default:
-		return credentialBrokerAnswer{}, response.StatusCode == http.StatusUnauthorized, fmt.Errorf("%w: HTTP %d", ErrCredentialBrokerRejected, response.StatusCode)
+		return nil, response.StatusCode == http.StatusUnauthorized, fmt.Errorf("%w: HTTP %d", ErrCredentialBrokerRejected, response.StatusCode)
 	}
 	if readErr != nil || closeErr != nil {
 		if ctx.Err() != nil {
-			return credentialBrokerAnswer{}, false, ctx.Err()
+			return nil, false, ctx.Err()
 		}
-		return credentialBrokerAnswer{}, false, fmt.Errorf("%w: response could not be read", ErrCredentialBrokerUnavailable)
+		return nil, false, fmt.Errorf("%w: response could not be read", ErrCredentialBrokerUnavailable)
 	}
-	answer, err = decodeCredentialBrokerAnswer(contents)
-	return answer, false, err
+	if len(contents) > maximumCredentialBrokerResponseBytes {
+		return nil, false, fmt.Errorf("%w: response is too large", ErrCredentialBrokerRejected)
+	}
+	return contents, false, nil
 }
 
 // bearerToken reads the pinned scope token once; a failure is not cached.
@@ -201,9 +215,6 @@ func (broker *credentialBroker) renewBearerToken(ctx context.Context, refused st
 func decodeCredentialBrokerAnswer(contents []byte) (credentialBrokerAnswer, error) {
 	invalid := func(reason string) (credentialBrokerAnswer, error) {
 		return credentialBrokerAnswer{}, fmt.Errorf("%w: %s", ErrCredentialBrokerRejected, reason)
-	}
-	if len(contents) > maximumCredentialBrokerResponseBytes {
-		return invalid("response is too large")
 	}
 	var response credentialBrokerResponse
 	if json.Unmarshal(contents, &response) != nil {
