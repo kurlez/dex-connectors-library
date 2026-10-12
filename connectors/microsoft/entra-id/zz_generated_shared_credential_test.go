@@ -83,23 +83,15 @@ func withoutSharedCredentialFields(t *testing.T, credential []byte, names ...str
 	return encoded
 }
 
-// hostKeptCredentialAccess is a place outside the generated codec and the refresh driver that reads a host-kept field
-// of Credentials or hands a whole Credentials value to reflection or a field-walking function.
-type hostKeptCredentialAccess struct {
-	position string
-	function string
-	access   string
-}
-
-func (access hostKeptCredentialAccess) String() string {
-	return access.position + ": " + access.function + " " + access.access
-}
-
 // fieldWalkingPackages read every field of a value they receive, so a Credentials value must never reach them.
 var fieldWalkingPackages = []string{
 	"reflect", "fmt", "log", "log/slog", "encoding/json", "encoding/xml", "encoding/gob", "gopkg.in/yaml.v3", "gopkg.in/yaml.v2",
 }
 
+// TestHostKeptCredentialsStayInTheRefreshDriver allows a read of a host-kept field in exactly three places: the
+// generated codec in zz_generated_connector.go, CredentialRefreshDriver's Refresh and RefreshRequired methods, and the
+// unexported functions and methods of the root package that those two use, directly or through each other. A shared
+// entry runs none of them. No code may pass a value holding Credentials to reflection or a field-walking function.
 func TestHostKeptCredentialsStayInTheRefreshDriver(t *testing.T) {
 	accesses := findHostKeptCredentialAccesses(t)
 	require.Empty(t, accesses, "only the generated codec and CredentialRefreshDriver's Refresh and RefreshRequired with the unexported "+
