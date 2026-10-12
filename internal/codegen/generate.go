@@ -126,37 +126,7 @@ func Generate(manifest schema.Manifest) ([]byte, error) {
 	generation.mustWrite("\tclient, err := New(config, credentials, options...)\n")
 	generation.mustWrite("\tif err != nil { return Connection{}, err }\n")
 	generation.mustWrite("\treturn NewConnection(client, reference)\n}\n\n")
-	generation.mustWrite("func decodeCredentials(contents json.RawMessage) (Credentials, error) {\n")
-	generation.mustWrite("\tvar fields struct {\n")
-	if selection := credentialSelection(manifest.Spec.Auth); selection != nil {
-		generation.mustWrite("\t\t%s %s `json:\"%s\"`\n", selection.goName, selection.goType, selection.wireName)
-	}
-	for _, field := range manifest.Spec.Auth.Fields {
-		fieldType := goType(field)
-		if field.Type == "secretString" {
-			fieldType = "string"
-		}
-		generation.mustWrite("\t\t%s %s `json:\"%s\"`\n", field.GoName, fieldType, field.Name)
-	}
-	generation.mustWrite("\t}\n")
-	generation.mustWrite("\tif err := projectconfig.DecodeCredentials(contents, &fields); err != nil { return Credentials{}, err }\n")
-	if selection := credentialSelection(manifest.Spec.Auth); selection != nil {
-		generation.mustWrite("\t// Credentials saved before the connector declared auth methods carry no %s; they use the default method.\n", selection.wireName)
-		generation.mustWrite("\tif fields.%s == \"\" { fields.%s = %s }\n", selection.goName, selection.goName, strconv.Quote(manifest.Spec.Auth.DefaultMethod))
-	}
-	generation.mustWrite("\tcredentials := Credentials{\n")
-	if selection := credentialSelection(manifest.Spec.Auth); selection != nil {
-		generation.mustWrite("\t\t%s: fields.%s,\n", selection.goName, selection.goName)
-	}
-	for _, field := range manifest.Spec.Auth.Fields {
-		value := "fields." + field.GoName
-		if field.Type == "secretString" {
-			value = "sdkgo.NewSecretString(" + value + ")"
-		}
-		generation.mustWrite("\t\t%s: %s,\n", field.GoName, value)
-	}
-	generation.mustWrite("\t}\n")
-	generation.mustWrite("\treturn credentials, credentials.Validate()\n}\n\n")
+	writeCredentialDecoding(generation, manifest)
 	if manifest.Spec.Auth.Refreshable {
 		generation.mustWrite("func encodeCredentials(credentials Credentials) (json.RawMessage, error) {\n")
 		generation.mustWrite("\tfields := struct {\n")
@@ -224,22 +194,7 @@ func Generate(manifest schema.Manifest) ([]byte, error) {
 		writeFieldValidation(generation, "config."+field.GoName, field, "configuration")
 	}
 	generation.mustWrite("\treturn nil\n}\n\n")
-	generation.mustWrite("func (credentials Credentials) Validate() error {\n")
-	if len(manifest.Spec.Auth.Methods) == 0 {
-		for _, field := range manifest.Spec.Auth.Fields {
-			writeFieldValidation(generation, "credentials."+field.GoName, field, "credential")
-		}
-	} else {
-		generation.mustWrite("\tswitch credentials.AuthMethodID {\n")
-		for _, method := range manifest.Spec.Auth.Methods {
-			generation.mustWrite("\tcase %s:\n", strconv.Quote(method.ID))
-			for _, field := range method.Fields {
-				writeFieldValidation(generation, "credentials."+field.GoName, field, "credential")
-			}
-		}
-		generation.mustWrite("\tdefault:\n\t\treturn fmt.Errorf(%q)\n\t}\n", "credential auth_method is invalid")
-	}
-	generation.mustWrite("\treturn nil\n}\n\n")
+	writeCredentialValidation(generation, manifest)
 
 	for _, trigger := range manifest.Spec.Triggers {
 		generation.mustWrite("var %sTriggerDefinition = sdkgo.TriggerDefinition{\n", trigger.GoName)

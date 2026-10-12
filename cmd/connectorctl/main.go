@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -388,11 +389,19 @@ func generate(args []string) error {
 	if err != nil {
 		return err
 	}
+	sharedCredentialFiles, err := generatedSharedCredentialFiles(args[0], manifest)
+	if err != nil {
+		return err
+	}
 	for path, contents := range refreshAgreementFiles {
+		mockFiles[path] = contents
+	}
+	for path, contents := range sharedCredentialFiles {
 		mockFiles[path] = contents
 	}
 	stale := staleMockFiles(args[0], manifest)
 	staleRefreshAgreement := staleRefreshAgreementFiles(args[0], manifest)
+	staleSharedCredential := staleSharedCredentialFiles(args[0], manifest)
 	if check {
 		current, readErr := os.ReadFile(output)
 		if readErr != nil {
@@ -407,12 +416,15 @@ func generate(args []string) error {
 		if len(staleRefreshAgreement) > 0 {
 			return fmt.Errorf("generated credential refresh agreement test is stale because the manifest declares no token grants: %s", staleRefreshAgreement[0])
 		}
+		if len(staleSharedCredential) > 0 {
+			return fmt.Errorf("generated shared credential test is stale because the manifest keeps no credentials on the host: %s", staleSharedCredential[0])
+		}
 		return checkGeneratedFiles(mockFiles)
 	}
 	if err := os.WriteFile(output, generated, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", output, err)
 	}
-	for _, path := range append(stale, staleRefreshAgreement...) {
+	for _, path := range slices.Concat(stale, staleRefreshAgreement, staleSharedCredential) {
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("remove stale %s: %w", path, err)
 		}
