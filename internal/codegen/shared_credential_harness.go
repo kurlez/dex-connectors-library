@@ -64,8 +64,8 @@ func withoutSharedCredentialFields(t *testing.T, credential []byte, names ...str
 	return encoded
 }
 
-// hostKeptCredentialAccess is a place outside the generated codec and the refresh driver's Refresh path that reads a
-// host-kept field of Credentials or hands a whole Credentials value to reflection or a field-walking function.
+// hostKeptCredentialAccess is a place outside the generated codec and the refresh driver that reads a host-kept field
+// of Credentials or hands a whole Credentials value to reflection or a field-walking function.
 type hostKeptCredentialAccess struct {
 	position string
 	function string
@@ -83,8 +83,9 @@ var fieldWalkingPackages = []string{
 
 func TestHostKeptCredentialsStayInTheRefreshDriver(t *testing.T) {
 	accesses := findHostKeptCredentialAccesses(t)
-	require.Empty(t, accesses, "only the generated codec and CredentialRefreshDriver.Refresh with the unexported helpers it uses may "+
-		"read the host-kept fields %v, and no code may pass Credentials to reflection or a field-walking function", hostKeptCredentialFields)
+	require.Empty(t, accesses, "only the generated codec and CredentialRefreshDriver's Refresh and RefreshRequired with the unexported "+
+		"helpers they use may read the host-kept fields %v, and no code may pass Credentials to reflection or a field-walking function",
+		hostKeptCredentialFields)
 }
 
 // listedPackage is the part of ` + "`" + `go list -json` + "`" + ` that type checking needs.
@@ -177,8 +178,9 @@ func isRaceBuild() bool {
 	return false
 }
 
-// refreshDriverDeclarations returns CredentialRefreshDriver's Refresh method and every unexported function or method
-// of the package that it uses, directly or through another such function.
+// refreshDriverDeclarations returns CredentialRefreshDriver's Refresh and RefreshRequired methods and every unexported
+// function or method of the package that they use, directly or through another such function. A shared entry calls
+// neither method.
 func refreshDriverDeclarations(t *testing.T, checked *types.Package, files []*ast.File, info *types.Info) map[*ast.FuncDecl]bool {
 	t.Helper()
 	declarations := map[*types.Func]*ast.FuncDecl{}
@@ -191,10 +193,13 @@ func refreshDriverDeclarations(t *testing.T, checked *types.Package, files []*as
 	}
 	driver, isTypeName := checked.Scope().Lookup("CredentialRefreshDriver").(*types.TypeName)
 	require.True(t, isTypeName, "the connector declares CredentialRefreshDriver")
-	refresh, _, _ := types.LookupFieldOrMethod(types.NewPointer(driver.Type()), true, checked, "Refresh")
-	require.NotNil(t, refresh, "CredentialRefreshDriver has Refresh")
+	var pending []*types.Func
+	for _, name := range []string{"Refresh", "RefreshRequired"} {
+		method, _, _ := types.LookupFieldOrMethod(types.NewPointer(driver.Type()), true, checked, name)
+		require.NotNil(t, method, "CredentialRefreshDriver has %s", name)
+		pending = append(pending, method.(*types.Func))
+	}
 	reachable := map[*ast.FuncDecl]bool{}
-	pending := []*types.Func{refresh.(*types.Func)}
 	for len(pending) > 0 {
 		function := pending[0]
 		pending = pending[1:]

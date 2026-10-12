@@ -75,7 +75,7 @@ func TestGeneratedSharedCredentialTestRejectsHostKeptAccessOutsideTheRefreshDriv
 				"\tprintln(credentials.PrivateKey.Reveal())\n}\n",
 			report: "examples/app/main.go:7: main reads PrivateKey",
 		},
-		"a read in a driver method that Refresh never uses": {
+		"a read in a driver method that neither Refresh nor RefreshRequired uses": {
 			path: "required.go",
 			source: "package tokengrants\n\nfunc (driver *CredentialRefreshDriver) hasClientSecret(credentials Credentials) bool {\n" +
 				"\treturn credentials.ClientSecret.Reveal() != \"\"\n}\n",
@@ -101,7 +101,7 @@ func TestGeneratedSharedCredentialTestRejectsHostKeptAccessOutsideTheRefreshDriv
 	}
 }
 
-func TestGeneratedSharedCredentialTestRejectsAHostKeptReadInRefreshRequired(t *testing.T) {
+func TestGeneratedSharedCredentialTestAllowsAHostKeptReadInRefreshRequired(t *testing.T) {
 	client, err := os.ReadFile(filepath.Join(tokenGrantsFixturePath, "client.go"))
 	require.NoError(t, err)
 	const accessTokenCheck = `return state.Credentials.AccessToken.Reveal() == ""`
@@ -110,8 +110,7 @@ func TestGeneratedSharedCredentialTestRejectsAHostKeptReadInRefreshRequired(t *t
 
 	output, err := runFixtureModuleTests(t, tokenGrantsModulePath, tokenGrantsFixtureFiles(t, map[string]string{"client.go": edited}))
 
-	require.Error(t, err, "a shared entry never calls RefreshRequired, but it is not the Refresh path either")
-	require.Contains(t, output, "(*CredentialRefreshDriver).RefreshRequired reads RefreshToken")
+	require.NoError(t, err, "a shared entry never calls RefreshRequired, so it may decide with a refresh token: %s", output)
 }
 
 func tokenGrantsFixtureFiles(t *testing.T, extra map[string]string) map[string][]byte {

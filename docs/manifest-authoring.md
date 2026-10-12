@@ -496,11 +496,12 @@ The generated `zz_generated_shared_credential_test.go` checks the connector:
   required field stays required;
 - it type-checks every non-test package of the connector module and fails when
   code reads a host-kept field of `Credentials` anywhere except the generated
-  codec and `CredentialRefreshDriver.Refresh` with the unexported functions it
-  uses, or passes a value that holds `Credentials` to `reflect`, `fmt`, `log`,
-  `log/slog`, or an encoding package.
+  codec and the `CredentialRefreshDriver` methods `Refresh` and
+  `RefreshRequired` with the unexported functions they use, or passes a value
+  that holds `Credentials` to `reflect`, `fmt`, `log`, `log/slog`, or an
+  encoding package.
 
-A shared entry never calls the refresh driver, so with these checks an
+A shared entry never calls either driver method, so with these checks an
 application of a shared connection calls its provider with the access token
 alone. `go test` of the connector runs the test, and `connectorctl generate
 --check` keeps it current.

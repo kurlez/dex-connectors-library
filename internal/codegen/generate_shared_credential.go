@@ -16,7 +16,7 @@ import (
 
 // SharedCredentialTestOutputFile is the generated test of a connector whose host keeps credentials. It checks that a
 // shared credential without the host-kept fields decodes, and that only the generated codec and the credential
-// refresh driver's Refresh path read those fields.
+// refresh driver read those fields.
 const SharedCredentialTestOutputFile = "zz_generated_shared_credential_test.go"
 
 // GenerateSharedCredentialTest returns the shared credential test of a manifest whose host keeps credentials.
