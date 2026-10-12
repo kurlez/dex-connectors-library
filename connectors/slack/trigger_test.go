@@ -1229,3 +1229,58 @@ func messageEnvelope(t *testing.T, eventID string, message messageEvent) socketE
 	require.NoError(t, err)
 	return socketEnvelope{EnvelopeID: "envelope-" + eventID, Type: "events_api", Payload: payload}
 }
+
+// TestProjectConnectionRunnerReadsItsCredentialAndOpensSocketMode opens the connection as NewProjectConnection does,
+// whose project credential provider refuses a call that does not name the connector.
+func TestProjectConnectionRunnerReadsItsCredentialAndOpensSocketMode(t *testing.T) {
+	openAuthorizations := make(chan string, 8)
+	slackAPI := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if strings.HasSuffix(request.URL.Path, "/apps.connections.open") {
+			openAuthorizations <- request.Header.Get("Authorization")
+		}
+		_, _ = response.Write([]byte(`{"ok":false,"error":"invalid_auth"}`))
+	}))
+	t.Cleanup(slackAPI.Close)
+	fixture := newProjectSlackFixture(t)
+	store, err := projectconfig.NewConnectionStore(&projectconfig.ConnectionStoreConfig{Objects: fixture.objects, Scope: projectSlackScope})
+	require.NoError(t, err)
+	stored, err := json.Marshal(map[string]string{"bot_token": sentinelBotToken, "user_token": sentinelUserToken, "app_token": sentinelAppToken})
+	require.NoError(t, err)
+	_, err = store.ReplaceCredential(context.Background(), projectconfig.ConnectionKey{ConnectorID: ConnectorID, ConnectionName: "workspace"}, 0,
+		projectconfig.CredentialMaterial{Credentials: stored, AuthMethod: "default"})
+	require.NoError(t, err)
+	settings, err := json.Marshal(map[string]string{"endpoint": slackAPI.URL})
+	require.NoError(t, err)
+	configuration := fixture.configuration
+	configuration.Connections = []projectconfig.ConnectionConfiguration{{
+		ConnectorID: ConnectorID, ConnectionName: "workspace", ModulePath: "github.com/superdurable/dex-connectors-library/connectors/slack",
+		Provider: "slack", Configuration: settings,
+	}}
+	logs := testlog.NewLogRecorder()
+	connection, err := NewProjectConnection(&projectconfig.LoadedProject{Connections: store, Configuration: configuration}, "workspace", WithLogger(logs.Logger()))
+	require.NoError(t, err)
+	runner, err := newDurableMessageTriggerRunner(connection, configuration, ProjectMessageTriggerRunnerConfig{
+		ChannelThreadCreatedRoutes: []ProjectChannelThreadCreatedTriggerRoute{{
+			BindingName: "approval-start",
+			Target: sdkgo.TriggerTargetFunc[MessageEvent](func(context.Context, sdkgo.TriggerEvent[MessageEvent]) error {
+				return nil
+			}),
+		}},
+	}, func(_ projectconfig.TriggerInboxKey, target sdkgo.TriggerTarget[MessageEvent]) (sdkgo.TriggerTarget[MessageEvent], error) {
+		return target, nil
+	})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runFinished := make(chan error, 1)
+	go func() { runFinished <- runner.Run(ctx) }()
+	select {
+	case authorization := <-openAuthorizations:
+		require.Equal(t, "Bearer "+sentinelAppToken, authorization, "the stored app-level token opens Socket Mode")
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the runner never opened Socket Mode; records: %v", logs.Messages())
+	}
+	cancel()
+	require.ErrorIs(t, receiveRunResult(t, runFinished), context.Canceled)
+	requireNoSentinel(t, logs)
+}

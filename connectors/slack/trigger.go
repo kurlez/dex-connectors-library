@@ -258,7 +258,7 @@ func runMessageTriggerConnection(ctx context.Context, routes []messageTriggerRou
 		}
 	}
 	source := routes[0].source
-	credentials, err := sdkgo.ResolveCredential(ctx, source.client.credentials, sdkgo.Call{Connection: source.connection}, source.client.refreshDriver)
+	credentials, err := sdkgo.ResolveCredential(ctx, source.client.credentials, source.credentialCall(), source.client.refreshDriver)
 	if err != nil {
 		// A credential provider's error may quote what it read, so only its absence is reported.
 		return false, fmt.Errorf("Slack Socket Mode credentials are unavailable")
@@ -327,6 +327,14 @@ func runMessageTriggerConnection(ctx context.Context, routes []messageTriggerRou
 				return true, err
 			}
 		}
+	}
+}
+
+// credentialCall identifies the source's credential reads. A project connection's provider refuses a call
+// without the connector ID.
+func (source *messageTriggerSource) credentialCall() sdkgo.Call {
+	return sdkgo.Call{
+		Connection: source.connection, Operation: sdkgo.OperationRef{ConnectorID: ConnectorID, OperationID: source.triggerName},
 	}
 }
 
