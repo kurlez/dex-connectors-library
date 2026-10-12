@@ -23,6 +23,8 @@ type LoadedProject struct {
 	objects        ObjectStore
 	scope          Scope
 	configurations *ConfigurationStore
+	// broker is the credential broker client, or nil when the document declares no credentialBroker.
+	broker *credentialBroker
 	// Connections resolves private credential material through the fixed project boundary, and a shared entry's
 	// credential through the credential broker.
 	Connections *ConnectionStore
@@ -91,15 +93,23 @@ func loadProject(ctx context.Context, objects ObjectStore, scope Scope, referenc
 	if err != nil {
 		return nil, err
 	}
+	if options.now == nil {
+		options.now = time.Now
+	}
 	storeConfig := &ConnectionStoreConfig{Objects: objects, Scope: scope}
+	var broker *credentialBroker
 	if configuration.CredentialBroker != nil {
-		storeConfig.sharedConnections = &sharedConnectionsConfig{configuration: configuration, configurations: configurations, httpClient: options.httpClient, now: options.now}
+		broker = newCredentialBroker(*configuration.CredentialBroker, configurations, options.httpClient, options.now)
+		storeConfig.sharedConnections = &sharedConnectionsConfig{configuration: configuration, broker: broker, now: options.now}
 	}
 	connections, err := NewConnectionStore(storeConfig)
 	if err != nil {
 		return nil, err
 	}
-	return &LoadedProject{objects: objects, scope: scope, configurations: configurations, Connections: connections, Configuration: configuration, Snapshot: reference}, nil
+	return &LoadedProject{
+		objects: objects, scope: scope, configurations: configurations, broker: broker,
+		Connections: connections, Configuration: configuration, Snapshot: reference,
+	}, nil
 }
 
 // TriggerInbox binds one Trigger binding's durable inbox in the loaded project scope.

@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -28,12 +27,11 @@ const (
 
 // sharedConnectionsConfig routes the document's shared entries to the credential broker.
 type sharedConnectionsConfig struct {
-	// configuration is the loaded document: its credentialBroker and its shared entries.
+	// configuration is the loaded document: its shared entries.
 	configuration Configuration
-	// configurations rereads the document's credentialBroker to renew the scope token.
-	configurations *ConfigurationStore
-	httpClient     *http.Client
-	now            func() time.Time
+	// broker is the client of the document's credentialBroker, which the project's relayed Triggers share.
+	broker *credentialBroker
+	now    func() time.Time
 }
 
 // sharedConnections holds one sharedConnection for each shared entry of the loaded document.
@@ -45,7 +43,7 @@ func newSharedConnections(config *sharedConnectionsConfig) *sharedConnections {
 	if config.now == nil {
 		config.now = time.Now
 	}
-	broker := newCredentialBroker(*config.configuration.CredentialBroker, config.configurations, config.httpClient)
+	broker := config.broker
 	shared := &sharedConnections{entries: map[ConnectionKey]*sharedConnection{}}
 	for _, connection := range config.configuration.Connections {
 		if connection.SharedConnectionID == "" {
