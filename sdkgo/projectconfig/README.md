@@ -221,6 +221,54 @@ decodes a shared credential with its ordinary decoder, which fails with "this
 connector version does not support shared credentials" when the broker has
 removed host-kept fields. Ordinary entries always use the ordinary decoder.
 
+### Relayed Triggers
+
+A host whose own provider application receives events for many shared
+connections, such as one webhook subscription for every installation, can relay
+each event to the applications that use the connection. Two calls on
+`LoadedProject` serve a connector's relayed receiver, and both keep the scope
+token inside this package.
+
+`RegisterRelayedTrigger(ctx, key, registrationPath)` tells the broker that the
+shared entry `key` receives relayed events. The connector names the broker's
+fixed registration path, and the SDK resolves it against the origin of
+`credentialBroker.endpoint`, so the document needs no other field and the
+request names no address; the host derives the receiver's URL itself.
+
+```text
+POST <origin of credentialBroker.endpoint><registrationPath>
+Authorization: Bearer <scope token>
+Content-Type: application/json
+
+{"sharedConnectionId": "conn-7", "connectionName": "releases"}
+```
+
+The broker answers HTTP 200 with `{"status": ...}`: `REGISTERED` returns nil,
+`CONNECTION_NOT_SELECTED` is `ErrConnectionNotSelected`, and `NOT_RELAYED` is
+`ErrRelayedTriggerNotRelayed`, for a connection whose events the broker does
+not relay. Other statuses and every HTTP status, the 401 renewal, the timeout
+and the size limit follow the credential read's [wire contract](#wire-contract),
+so `ErrCredentialBrokerUnavailable` is worth retrying and
+`ErrCredentialBrokerRejected` is not. A connector registers each time its
+relayed receiver starts. An ordinary or unknown entry, and a document without
+`credentialBroker`, fail without a request.
+
+`VerifyRelayedRequest(ctx, header, body, receivedAt)` checks that the host
+signed a relayed request with the scope token:
+
+```text
+Dex-Relay-Timestamp: <Unix seconds>
+Dex-Relay-Signature: v1=<hex HMAC-SHA256 of "v1:<timestamp>:<raw body>">
+```
+
+The comparison is constant time, and a timestamp more than 5 minutes from
+`receivedAt` fails. A failed check is `ErrRelaySignatureInvalid`. A signature
+that does not match the cached token rereads the token once, as a 401 does, so
+a rotated token keeps working; because the receiver's route is public, such
+rereads happen at most once every 30 seconds per project. A token that cannot be
+read wraps `ErrCredentialBrokerUnavailable`, which a receiver answers as
+retryable. The verifier never calls the broker.
+
 ## Admission, recovery, and refresh
 
 `BeginCredentialExchange` compares the expected revision before provider

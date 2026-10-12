@@ -255,7 +255,12 @@ for an oversized body. Responses never carry verifier or decoder error text.
 bindings. A connector whose signing secret lives beside OAuth tokens sets
 `CredentialRefresh`, so each request resolves credentials through
 `sdkgo.ResolveCredential` and an expired access token is refreshed instead of
-answering `503`.
+answering `503`. A verifier that reads remote state, such as a signing key that
+can rotate, sets `VerifyRequestContext` instead of `VerifyRequest` and receives
+the request's context; an endpoint sets exactly one of them. A receiver of
+events that a host relays verifies them with
+`projectconfig.LoadedProject.VerifyRelayedRequest`
+([relayed Triggers](projectconfig/README.md#relayed-triggers)).
 
 A connector keeps one `Endpoint` per connection on its client, returns it as the
 `http.Handler` that applications mount, and returns `endpoint.NewSource(accept)`

@@ -371,7 +371,11 @@ as it does for a refreshed credential that is rejected again. The broker serves
 the credential without the secrets that the host keeps to refresh or mint it,
 so the provider decodes it with the credential type's
 `UnmarshalSharedCredential`, which does not require them, when the connector
-generates one.
+generates one. A host may also relay a shared connection's provider events to
+the application: the connector's relayed receiver registers its connection name
+with `LoadedProject.RegisterRelayedTrigger` and verifies each request with
+`LoadedProject.VerifyRelayedRequest`
+([relayed Triggers](../sdkgo/projectconfig/README.md#relayed-triggers)).
 See [Shared connections](../sdkgo/projectconfig/README.md#shared-connections).
 
 Generated operation and Trigger factory configs expose `ConnectionName` with
